@@ -1,4 +1,4 @@
-const DMG_URL = 'https://pub-83f852d659c145459103180a6d018dc2.r2.dev/SoundBridg-1.0.0-arm64.dmg'
+const DMG_URL = 'https://pub-83f852d659c145459103180a6d018dc2.r2.dev/SoundBridg-2.0.0-arm64.dmg'
 
 export default function Home({ setPage }) {
   return (
