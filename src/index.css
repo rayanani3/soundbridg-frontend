@@ -1,0 +1,51 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #0a0e27;
+  color: white;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #0a0e27; }
+::-webkit-scrollbar-thumb { background: #1b3a5c; border-radius: 3px; }
+
+.glass {
+  background: rgba(27, 58, 92, 0.25);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(201, 168, 76, 0.12);
+}
+
+.gold-glow {
+  box-shadow: 0 0 0px #c9a84c00;
+  transition: box-shadow 0.3s ease;
+}
+.gold-glow:hover {
+  box-shadow: 0 0 24px 2px rgba(201, 168, 76, 0.2);
+}
+
+.dropzone {
+  cursor: pointer;
+  border-radius: 0.75rem;
+  border: 2px dashed rgba(27, 58, 92, 0.4);
+  padding: 2rem;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+.dropzone:hover, .dropzone.active {
+  border-color: rgba(201, 168, 76, 0.6);
+  background: rgba(27, 58, 92, 0.1);
+}
+
+.delay-100 { animation-delay: 0.1s; }
+.delay-200 { animation-delay: 0.2s; }
+.delay-300 { animation-delay: 0.3s; }
+.delay-400 { animation-delay: 0.4s; }
