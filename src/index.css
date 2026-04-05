@@ -1,27 +1,66 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --bg: #0A0A0F;
+  --bg-card: #111118;
+  --bg-elevated: #16161F;
+  --bg-hover: #1A1A26;
+  --bg-input: #0D0D14;
+
+  --primary: #1B3A5C;
+  --primary-mid: #1E4268;
+  --primary-glow: rgba(27,58,92,0.4);
+
+  --accent: #C9A84C;
+  --accent-dim: rgba(201,168,76,0.10);
+  --accent-glow: rgba(201,168,76,0.20);
+  --accent-line: rgba(201,168,76,0.35);
+
+  --green: #22C55E;
+  --green-dim: rgba(34,197,94,0.10);
+  --red: #EF4444;
+  --red-dim: rgba(239,68,68,0.10);
+
+  --text-primary: #F0F0F5;
+  --text-secondary: #8E8EA0;
+  --text-tertiary: #4A4A5C;
+  --text-accent: #C9A84C;
+
+  --border: rgba(255,255,255,0.055);
+  --border-mid: rgba(255,255,255,0.09);
+  --border-accent: rgba(201,168,76,0.22);
+}
+
 body {
-  background-color: #0a0e27;
-  color: white;
-  font-family: 'DM Sans', system-ui, sans-serif;
+  background-color: var(--bg);
+  color: var(--text-primary);
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
 }
 
 ::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: #0a0e27; }
-::-webkit-scrollbar-thumb { background: #1b3a5c; border-radius: 3px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--primary); border-radius: 3px; }
 
+/* Hairline card surface */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+/* Legacy glass — keep for Home hero feature cards */
 .glass {
-  background: rgba(27, 58, 92, 0.25);
+  background: rgba(17,17,24,0.85);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(201, 168, 76, 0.12);
+  border: 1px solid var(--border);
 }
 
 .gold-glow {
@@ -29,20 +68,25 @@ body {
   transition: box-shadow 0.3s ease;
 }
 .gold-glow:hover {
-  box-shadow: 0 0 24px 2px rgba(201, 168, 76, 0.2);
+  box-shadow: 0 0 24px 2px var(--accent-glow);
 }
 
 .dropzone {
   cursor: pointer;
-  border-radius: 0.75rem;
-  border: 2px dashed rgba(27, 58, 92, 0.4);
+  border-radius: 10px;
+  border: 2px dashed rgba(27,58,92,0.4);
   padding: 2rem;
   text-align: center;
   transition: all 0.2s ease;
 }
 .dropzone:hover, .dropzone.active {
-  border-color: rgba(201, 168, 76, 0.6);
-  background: rgba(27, 58, 92, 0.1);
+  border-color: var(--accent-line);
+  background: rgba(27,58,92,0.1);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
 
 .delay-100 { animation-delay: 0.1s; }

@@ -9,8 +9,8 @@ export default function Home({ setPage }) {
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full blur-[120px] opacity-25 pointer-events-none" style={{background:'radial-gradient(circle, #c9a84c22, transparent)'}} />
 
         <div className="relative max-w-3xl mx-auto text-center">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full mb-10 text-xs font-medium tracking-widest uppercase" style={{background:'rgba(201,168,76,0.1)', border:'1px solid rgba(201,168,76,0.25)', color:'#c9a84c'}}>
-            <span className="w-1.5 h-1.5 rounded-full bg-brand-gold animate-pulse" />
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full mb-10 text-xs font-medium tracking-widest uppercase" style={{background:'var(--accent-dim)', border:'1px solid var(--accent-line)', color:'var(--accent)'}}>
+            <span className="w-1.5 h-1.5 rounded-full animate-breathe" style={{background:'var(--accent)'}} />
             Built for producers
           </div>
 

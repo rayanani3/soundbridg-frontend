@@ -12,33 +12,43 @@ export default function Navbar({ page, setPage }) {
   }
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-brand-ocean/20" style={{background:'rgba(10,14,39,0.92)', backdropFilter:'blur(16px)'}}>
-      <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+    <nav className="sticky top-0 z-50" style={{
+      height: '52px',
+      background: 'rgba(10,10,15,0.90)',
+      backdropFilter: 'blur(20px)',
+      borderBottom: '1px solid var(--border)',
+    }}>
+      <div className="max-w-6xl mx-auto px-8 h-full flex items-center justify-between">
         {/* Logo */}
-        <button onClick={() => setPage('home')} className="flex items-center gap-2 group">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{background:'linear-gradient(135deg, #1b3a5c, #0a0e27)', border:'1px solid rgba(201,168,76,0.3)'}}>
-            <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4">
-              <path d="M9 18V6l12-2v12" stroke="#c9a84c" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              <circle cx="6" cy="18" r="3" stroke="#c9a84c" strokeWidth="1.5"/>
-              <circle cx="18" cy="16" r="3" stroke="#c9a84c" strokeWidth="1.5"/>
+        <button onClick={() => setPage('home')} className="flex items-center gap-2.5 group">
+          <div className="w-7 h-7 rounded-[6px] flex items-center justify-center shrink-0" style={{
+            background: 'linear-gradient(135deg, #1B3A5C 0%, #C9A84C 120%)',
+          }}>
+            <svg viewBox="0 0 24 24" fill="none" className="w-3.5 h-3.5">
+              <path d="M9 18V6l12-2v12" stroke="#0A0A0F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <circle cx="6" cy="18" r="3" stroke="#0A0A0F" strokeWidth="2"/>
+              <circle cx="18" cy="16" r="3" stroke="#0A0A0F" strokeWidth="2"/>
             </svg>
           </div>
-          <span className="font-display font-bold text-lg tracking-tight">
-            Sound<span className="text-brand-gold">Bridg</span>
+          <span className="font-sans font-bold text-[15px] tracking-[-0.3px]" style={{color: 'var(--text-primary)'}}>
+            Sound<span style={{color: 'var(--accent)'}}>Bridg</span>
           </span>
         </button>
 
         {/* Desktop Nav */}
-        <div className="hidden md:flex items-center gap-1">
+        <div className="hidden md:flex items-center gap-0.5">
           {user ? (
             <>
               <NavBtn active={page === 'dashboard'} onClick={() => setPage('dashboard')}>Dashboard</NavBtn>
               <NavBtn active={page === 'convert'} onClick={() => setPage('convert')}>Convert</NavBtn>
               <NavBtn active={page === 'groups'} onClick={() => setPage('groups')}>Sync Groups</NavBtn>
               <NavBtn active={page === 'player'} onClick={() => setPage('player')}>Player</NavBtn>
-              <div className="ml-2 flex items-center gap-2">
-                <span className="text-sm text-white/50 truncate max-w-[120px]">{user.email}</span>
-                <button onClick={handleLogout} className="px-3 py-1.5 rounded-lg text-sm text-white/60 hover:text-red-400 hover:bg-red-400/10 transition-colors">
+              <div className="ml-3 flex items-center gap-2" style={{borderLeft: '1px solid var(--border)', paddingLeft: '12px'}}>
+                <span className="text-[13px] truncate max-w-[120px]" style={{color: 'var(--text-secondary)'}}>{user.email}</span>
+                <button onClick={handleLogout} className="px-3 py-1.5 rounded-[6px] text-[13px] font-medium transition-colors"
+                  style={{color: 'var(--text-secondary)'}}
+                  onMouseEnter={e => { e.currentTarget.style.color = 'var(--red)'; e.currentTarget.style.background = 'var(--red-dim)' }}
+                  onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.background = 'transparent' }}>
                   Logout
                 </button>
               </div>
@@ -46,10 +56,12 @@ export default function Navbar({ page, setPage }) {
           ) : (
             <>
               <NavBtn active={page === 'home'} onClick={() => setPage('home')}>Home</NavBtn>
-              <button onClick={() => setPage('login')} className="ml-2 px-4 py-1.5 rounded-lg text-sm font-medium border border-brand-gold/30 text-brand-gold hover:bg-brand-gold/10 transition-colors">
+              <button onClick={() => setPage('login')} className="ml-2 px-3 py-1.5 rounded-[6px] text-[13px] font-medium transition-colors"
+                style={{color: 'var(--text-secondary)', border: '1px solid var(--border-mid)'}}>
                 Sign In
               </button>
-              <button onClick={() => setPage('register')} className="px-4 py-1.5 rounded-lg text-sm font-medium bg-brand-gold text-brand-dark hover:brightness-110 transition-all">
+              <button onClick={() => setPage('register')} className="ml-1 px-3 py-1.5 rounded-[6px] text-[13px] font-semibold transition-all"
+                style={{background: 'var(--accent)', color: '#0A0A0F'}}>
                 Get Started
               </button>
             </>
@@ -57,7 +69,8 @@ export default function Navbar({ page, setPage }) {
         </div>
 
         {/* Mobile hamburger */}
-        <button onClick={() => setMenuOpen(!menuOpen)} className="md:hidden p-2 rounded-lg text-white/60 hover:text-white hover:bg-brand-ocean/20 transition-colors">
+        <button onClick={() => setMenuOpen(!menuOpen)} className="md:hidden p-2 rounded-[6px] transition-colors"
+          style={{color: 'var(--text-secondary)'}}>
           {menuOpen ? (
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           ) : (
@@ -68,14 +81,18 @@ export default function Navbar({ page, setPage }) {
 
       {/* Mobile menu */}
       {menuOpen && (
-        <div className="md:hidden border-t border-brand-ocean/20 px-4 py-3 flex flex-col gap-2">
+        <div className="md:hidden px-4 py-3 flex flex-col gap-1" style={{
+          borderTop: '1px solid var(--border)',
+          background: 'var(--bg-card)',
+        }}>
           {user ? (
             <>
               <MobileNavBtn onClick={() => { setPage('dashboard'); setMenuOpen(false) }}>Dashboard</MobileNavBtn>
               <MobileNavBtn onClick={() => { setPage('convert'); setMenuOpen(false) }}>Convert</MobileNavBtn>
               <MobileNavBtn onClick={() => { setPage('groups'); setMenuOpen(false) }}>Sync Groups</MobileNavBtn>
               <MobileNavBtn onClick={() => { setPage('player'); setMenuOpen(false) }}>Player</MobileNavBtn>
-              <button onClick={handleLogout} className="text-left px-3 py-2 rounded-lg text-sm text-red-400 hover:bg-red-400/10 transition-colors">Logout</button>
+              <button onClick={handleLogout} className="text-left px-3 py-2 rounded-[6px] text-[13px] transition-colors"
+                style={{color: 'var(--red)'}}>Logout</button>
             </>
           ) : (
             <>
@@ -92,7 +109,12 @@ export default function Navbar({ page, setPage }) {
 
 function NavBtn({ children, onClick, active }) {
   return (
-    <button onClick={onClick} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${active ? 'text-brand-gold bg-brand-gold/10' : 'text-white/60 hover:text-white hover:bg-brand-ocean/20'}`}>
+    <button onClick={onClick}
+      className="px-3 py-1.5 rounded-[6px] text-[13px] font-medium transition-colors"
+      style={{
+        color: active ? 'var(--accent)' : 'var(--text-secondary)',
+        background: active ? 'var(--accent-dim)' : 'transparent',
+      }}>
       {children}
     </button>
   )
@@ -100,7 +122,8 @@ function NavBtn({ children, onClick, active }) {
 
 function MobileNavBtn({ children, onClick }) {
   return (
-    <button onClick={onClick} className="text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-brand-ocean/20 transition-colors">
+    <button onClick={onClick} className="text-left px-3 py-2 rounded-[6px] text-[13px] transition-colors"
+      style={{color: 'var(--text-secondary)'}}>
       {children}
     </button>
   )
