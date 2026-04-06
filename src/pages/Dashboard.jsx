@@ -64,35 +64,23 @@ export default function Dashboard({ setPage }) {
   const fetchProjects = async () => {
     setLoading(true); setError('')
     try {
-      const res = await fetch(`${BACKEND_URL}/api/projects`, { headers: { Authorization: `Bearer ${getToken()}` } })
+      const res = await fetch(`${BACKEND_URL}/api/tracks`, { headers: { Authorization: `Bearer ${getToken()}` } })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to load')
-      setProjects(data.projects || [])
+      setProjects(Array.isArray(data) ? data : [])
     } catch (err) { setError(err.message) }
     setLoading(false)
   }
 
-  const fetchRecentlyDeleted = async () => {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/projects/recently-deleted`, { headers: { Authorization: `Bearer ${getToken()}` } })
-      const data = await res.json()
-      if (res.ok) setRecentlyDeleted(data.projects || [])
-    } catch {}
-  }
+  // No recently-deleted endpoint on this backend — keep state empty
+  const fetchRecentlyDeleted = async () => {}
 
-  const handleRestore = async (id) => {
-    setContextMenu(null)
-    try {
-      await fetch(`${BACKEND_URL}/api/projects/${id}/restore`, { method: 'POST', headers: { Authorization: `Bearer ${getToken()}` } })
-      setRecentlyDeleted(r => r.filter(x => x.id !== id))
-      fetchProjects()
-    } catch {}
-  }
+  const handleRestore = async () => { setContextMenu(null) } // no restore endpoint
 
   const handlePermanentDelete = async (id) => {
     setDeleting(id); setContextMenu(null)
     try {
-      await fetch(`${BACKEND_URL}/api/projects/${id}/permanent`, { method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` } })
+      await fetch(`${BACKEND_URL}/api/tracks/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` } })
       setRecentlyDeleted(r => r.filter(x => x.id !== id))
     } catch {}
     setDeleting(null)
@@ -101,32 +89,32 @@ export default function Dashboard({ setPage }) {
   const handleDelete = async (id) => {
     setDeleting(id); setContextMenu(null)
     try {
-      const res = await fetch(`${BACKEND_URL}/api/projects/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` } })
-      if (res.ok) {
-        const deleted = projects.find(x => x.id === id)
-        setProjects(p => p.filter(x => x.id !== id))
-        if (deleted) setRecentlyDeleted(r => [{ ...deleted, deleted_at: new Date().toISOString() }, ...r])
-      }
+      const res = await fetch(`${BACKEND_URL}/api/tracks/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` } })
+      if (res.ok) setProjects(p => p.filter(x => x.id !== id))
     } catch {}
     setDeleting(null)
   }
 
   const handleRename = async (id) => {
     if (!editingName.trim()) { setEditingId(null); return }
-    try {
-      await fetch(`${BACKEND_URL}/api/projects/${id}`, {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editingName.trim() })
-      })
-      setProjects(p => p.map(x => x.id === id ? { ...x, name: editingName.trim() } : x))
-    } catch {}
+    const track = projects.find(x => x.id === id)
+    const oldGroup = track?.sync_group || track?.title || ''
+    if (oldGroup) {
+      try {
+        await fetch(`${BACKEND_URL}/api/sync-group/${encodeURIComponent(oldGroup)}/rename`, {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: editingName.trim() })
+        })
+        setProjects(p => p.map(x => x.id === id ? { ...x, title: editingName.trim(), sync_group: editingName.trim() } : x))
+      } catch {}
+    }
     setEditingId(null)
   }
 
   const startEdit = (p) => {
     setEditingId(p.id)
-    setEditingName(p.name || p.file_name || '')
+    setEditingName(p.title || p.filename || '')
     setContextMenu(null)
   }
 
@@ -161,17 +149,18 @@ export default function Dashboard({ setPage }) {
   }
 
   const getKind = (p) => {
-    const name = (p.file_name || p.name || '').toLowerCase()
-    if (name.endsWith('.flp')) return 'FL Studio'
-    if (name.endsWith('.mp3')) return 'MP3'
-    if (name.endsWith('.wav')) return 'WAV'
-    if (name.endsWith('.flac')) return 'FLAC'
+    const fmt = (p.format || '').toLowerCase()
+    if (fmt === 'flp') return 'FL Studio'
+    if (fmt === 'mp3') return 'MP3'
+    if (fmt === 'wav') return 'WAV'
+    if (fmt === 'flac') return 'FLAC'
     return 'File'
   }
 
-  const getExt = (p) => (p.file_name || p.name || '').split('.').pop()?.toLowerCase() || ''
+  // Backend returns p.format directly; fall back to parsing filename
+  const getExt = (p) => p.format?.toLowerCase() || (p.filename || p.title || '').split('.').pop()?.toLowerCase() || ''
 
-  const totalUsed = projects.reduce((a, p) => a + (p.file_size || 0), 0)
+  const totalUsed = projects.reduce((a, p) => a + (p.size || 0), 0)
   const usedPct = Math.min((totalUsed / STORAGE_LIMIT) * 100, 100)
 
   const isRecentlyDeleted = activeFolder === 'Recently Deleted'
@@ -181,19 +170,19 @@ export default function Dashboard({ setPage }) {
     .filter(p => filterKind === 'all' || getExt(p) === filterKind)
     .sort((a, b) => {
       let va, vb
-      if (sortKey === 'name') { va = (a.name || a.file_name || '').toLowerCase(); vb = (b.name || b.file_name || '').toLowerCase() }
-      else if (sortKey === 'size') { va = a.file_size || 0; vb = b.file_size || 0 }
+      if (sortKey === 'name') { va = (a.title || a.filename || '').toLowerCase(); vb = (b.title || b.filename || '').toLowerCase() }
+      else if (sortKey === 'size') { va = a.size || 0; vb = b.size || 0 }
       else if (sortKey === 'kind') { va = getKind(a); vb = getKind(b) }
-      else { va = new Date(a.updated_at || a.created_at); vb = new Date(b.updated_at || b.created_at) }
+      else { va = new Date(a.created_at); vb = new Date(b.created_at) }
       return sortDir === 'asc' ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1)
     })
 
-  const shareUrl = shareProject?.file_url || ''
+  const shareUrl = shareProject ? `${BACKEND_URL}/api/tracks/${shareProject.id}/stream` : ''
 
   // Stats
-  const recentProject = [...projects].sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))[0]
-  const lastSyncAgo = recentProject ? fmtAgo(recentProject.updated_at || recentProject.created_at) : '—'
-  const lastSyncName = recentProject ? (recentProject.name || recentProject.file_name || '') : ''
+  const recentProject = [...projects].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
+  const lastSyncAgo = recentProject ? fmtAgo(recentProject.created_at) : '—'
+  const lastSyncName = recentProject ? (recentProject.title || recentProject.filename || '') : ''
 
   // Ring SVG math: circumference of r=30 circle = 2π*30 ≈ 188.5
   const ringCircum = 188.5
@@ -422,7 +411,7 @@ export default function Dashboard({ setPage }) {
               {projects.filter(p => getExt(p) === 'flp').length === 0 ? (
                 <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '64px 0', color: 'var(--text-tertiary)', fontSize: '13px' }}>No FL Studio projects yet. Start syncing from the desktop app.</div>
               ) : projects.filter(p => getExt(p) === 'flp').map((p, i) => (
-                <ProjectCard2 key={p.id} name={p.name || p.file_name || 'Untitled'} artGrad={ART_GRADS[i % ART_GRADS.length]} emoji={EMOJIS[i % EMOJIS.length]} meta={`${fmt(p.file_size)} · ${fmtAgo(p.updated_at || p.created_at)}`} />
+                <ProjectCard2 key={p.id} name={p.title || p.filename || 'Untitled'} artGrad={ART_GRADS[i % ART_GRADS.length]} emoji={EMOJIS[i % EMOJIS.length]} meta={`${fmt(p.size)} · ${fmtAgo(p.created_at)}`} />
               ))}
             </div>
           </div>
@@ -451,12 +440,12 @@ export default function Dashboard({ setPage }) {
                       <td style={{ padding: '12px 20px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <div style={{ width: 32, height: 32, borderRadius: '6px', background: ART_GRADS[i % ART_GRADS.length], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>{EMOJIS[i % EMOJIS.length]}</div>
-                          <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{p.name || p.file_name || 'Untitled'}</span>
+                          <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{p.title || p.filename || 'Untitled'}</span>
                         </div>
                       </td>
                       <td style={{ padding: '12px 20px' }}><span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: '10px', fontWeight: 600, padding: '2px 7px', borderRadius: '999px', background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid var(--accent-line)' }}>{getExt(p).toUpperCase()}</span></td>
-                      <td style={{ padding: '12px 20px', fontFamily: 'JetBrains Mono,monospace', fontSize: '12px', color: 'var(--text-secondary)' }}>{fmt(p.file_size)}</td>
-                      <td style={{ padding: '12px 20px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{fmtAgo(p.updated_at || p.created_at)}</td>
+                      <td style={{ padding: '12px 20px', fontFamily: 'JetBrains Mono,monospace', fontSize: '12px', color: 'var(--text-secondary)' }}>{fmt(p.size)}</td>
+                      <td style={{ padding: '12px 20px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{fmtAgo(p.created_at)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -574,7 +563,7 @@ export default function Dashboard({ setPage }) {
                     </div>
                   </td></tr>
                 ) : filtered.map((p, i) => {
-                  const name = p.name || p.file_name || 'Untitled'
+                  const name = p.title || p.filename || 'Untitled'
                   const ext = getExt(p)
                   const isEditing = editingId === p.id
                   const isWav = ext === 'wav'
@@ -640,7 +629,7 @@ export default function Dashboard({ setPage }) {
 
                       {/* Size */}
                       <td style={{ padding: '12px 20px', fontFamily: 'JetBrains Mono,monospace', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                        {fmt(p.file_size)}
+                        {fmt(p.size)}
                       </td>
 
                       {/* Sync */}
@@ -652,7 +641,7 @@ export default function Dashboard({ setPage }) {
                           </div>
                         ) : (
                           <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                            {fmtAgo(isRecentlyDeleted ? p.deleted_at : p.updated_at || p.created_at)}
+                            {fmtAgo(p.created_at)}
                           </span>
                         )}
                       </td>
@@ -671,18 +660,9 @@ export default function Dashboard({ setPage }) {
                             </>
                           ) : (
                             <>
-                              {p.file_url && (
-                                <IconBtn title="Share" onClick={() => { setShareProject(p); setShareTab('share') }} color="var(--accent)">
-                                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ width: 13, height: 13 }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
-                                </IconBtn>
-                              )}
-                              {p.file_url && (
-                                <a href={p.file_url} download>
-                                  <IconBtn title="Download" color="var(--accent)">
-                                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ width: 13, height: 13 }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                                  </IconBtn>
-                                </a>
-                              )}
+                              <IconBtn title="Share" onClick={() => { setShareProject(p); setShareTab('share') }} color="var(--accent)">
+                                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ width: 13, height: 13 }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+                              </IconBtn>
                               <IconBtn title="Move to Trash" onClick={() => handleDelete(p.id)} disabled={deleting === p.id} color="var(--red)">
                                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ width: 13, height: 13 }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                               </IconBtn>
@@ -707,11 +687,11 @@ export default function Dashboard({ setPage }) {
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '16px', marginBottom: '32px' }}>
                 {topProjects.map((p, i) => {
-                  const name = p.name || p.file_name || 'Untitled'
+                  const name = p.title || p.filename || 'Untitled'
                   const artGrad = ART_GRADS[i % ART_GRADS.length]
                   const emoji = EMOJIS[i % EMOJIS.length]
                   return (
-                    <ProjectCard2 key={p.id} name={name} artGrad={artGrad} emoji={emoji} meta={`${fmt(p.file_size)} · ${fmtAgo(p.updated_at || p.created_at)}`} />
+                    <ProjectCard2 key={p.id} name={name} artGrad={artGrad} emoji={emoji} meta={`${fmt(p.size)} · ${fmtAgo(p.created_at)}`} />
                   )
                 })}
               </div>
@@ -756,11 +736,11 @@ export default function Dashboard({ setPage }) {
                 <div style={{ display: 'flex', gap: '20px', fontSize: '11.5px', color: 'var(--text-secondary)' }}>
                   <span>
                     <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '2px', background: 'var(--primary-mid)', marginRight: '5px', verticalAlign: 'middle' }} />
-                    WAV · {fmt(projects.filter(p => getExt(p) === 'wav').reduce((a, p) => a + (p.file_size || 0), 0))}
+                    WAV · {fmt(projects.filter(p => getExt(p) === 'wav').reduce((a, p) => a + (p.size || 0), 0))}
                   </span>
                   <span>
                     <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '2px', background: 'var(--accent)', marginRight: '5px', verticalAlign: 'middle' }} />
-                    MP3 · {fmt(projects.filter(p => getExt(p) === 'mp3').reduce((a, p) => a + (p.file_size || 0), 0))}
+                    MP3 · {fmt(projects.filter(p => getExt(p) === 'mp3').reduce((a, p) => a + (p.size || 0), 0))}
                   </span>
                 </div>
               </div>
@@ -801,7 +781,7 @@ export default function Dashboard({ setPage }) {
             </div>
             <div>
               <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--accent)' }}>
-                {recentProject ? (recentProject.name || recentProject.file_name || 'Untitled').slice(0, 22) : 'No track playing'}
+                {recentProject ? (recentProject.title || recentProject.filename || 'Untitled').slice(0, 22) : 'No track playing'}
               </div>
               <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginTop: '1px' }}>
                 {user?.name || 'SoundBridg'}
@@ -872,8 +852,7 @@ export default function Dashboard({ setPage }) {
             ) : (
               <>
                 <CtxItem onClick={() => startEdit(contextMenu.project)}>Rename</CtxItem>
-                {contextMenu.project.file_url && <CtxItem onClick={() => { setShareProject(contextMenu.project); setShareTab('share'); setContextMenu(null) }}>Share</CtxItem>}
-                {contextMenu.project.file_url && <a href={contextMenu.project.file_url} download onClick={() => setContextMenu(null)} style={{ display: 'block' }}><CtxItem>Download</CtxItem></a>}
+                <CtxItem onClick={() => { setShareProject(contextMenu.project); setShareTab('share'); setContextMenu(null) }}>Share</CtxItem>
                 <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
                 <CtxItem red onClick={() => handleDelete(contextMenu.project.id)}>Move to Trash</CtxItem>
               </>
@@ -911,7 +890,7 @@ export default function Dashboard({ setPage }) {
                   <svg style={{ width: 20, height: 20, color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19V6l12-2v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-2c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-2" /></svg>
                 </div>
                 <div style={{ minWidth: 0 }}>
-                  <p style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shareProject.name || shareProject.file_name}</p>
+                  <p style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shareProject.title || shareProject.filename}</p>
                   <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{user?.name || 'SoundBridg'}</p>
                 </div>
               </div>
