@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 const STORAGE_LIMIT = 10 * 1024 * 1024 * 1024 // 10 GB
 
 export default function Dashboard({ setPage }) {
-  const { user, getToken, BACKEND_URL } = useAuth()
+  const { user, getToken, BACKEND_URL, logout } = useAuth()
   const [projects, setProjects] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -13,6 +13,7 @@ export default function Dashboard({ setPage }) {
   const [filterKind, setFilterKind] = useState('all')
   const [folders, setFolders] = useState(['All Files', 'Recently Deleted'])
   const [activeFolder, setActiveFolder] = useState('All Files')
+  const [innerView, setInnerView] = useState('dashboard') // 'dashboard' | 'projects' | 'tracks' | 'sync' | 'convert' | 'settings' | 'upgrade'
   const [recentlyDeleted, setRecentlyDeleted] = useState([])
   const [newFolderName, setNewFolderName] = useState('')
   const [showFolderInput, setShowFolderInput] = useState(false)
@@ -221,25 +222,26 @@ export default function Dashboard({ setPage }) {
             Workspace
           </div>
           <SideNavItem
-            active={!isRecentlyDeleted}
-            onClick={() => setActiveFolder('All Files')}
+            active={innerView === 'dashboard' && !isRecentlyDeleted}
+            onClick={() => { setInnerView('dashboard'); setActiveFolder('All Files') }}
             icon={<svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" /></svg>}
             badge={projects.length}
           >Dashboard</SideNavItem>
           <SideNavItem
-            active={false}
-            onClick={() => setActiveFolder('All Files')}
+            active={innerView === 'projects'}
+            onClick={() => { setInnerView('projects'); setActiveFolder('All Files') }}
             icon={<svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" /></svg>}
+            badge={projects.filter(p => getExt(p) === 'flp').length}
           >Projects</SideNavItem>
           <SideNavItem
-            active={false}
-            onClick={() => setActiveFolder('All Files')}
+            active={innerView === 'tracks'}
+            onClick={() => { setInnerView('tracks'); setActiveFolder('All Files') }}
             icon={<svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}><path d="M9 19V6l12-2v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-2c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-2" /></svg>}
             badge={projects.filter(p => getExt(p) === 'wav' || getExt(p) === 'mp3').length}
           >Tracks</SideNavItem>
           <SideNavItem
-            active={isRecentlyDeleted}
-            onClick={() => setActiveFolder('Recently Deleted')}
+            active={isRecentlyDeleted && innerView === 'dashboard'}
+            onClick={() => { setInnerView('dashboard'); setActiveFolder('Recently Deleted') }}
             icon={<svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
             badge={recentlyDeleted.length}
           >Trash</SideNavItem>
@@ -251,18 +253,18 @@ export default function Dashboard({ setPage }) {
             Tools
           </div>
           <SideNavItem
-            active={false}
-            onClick={() => setPage('groups')}
+            active={innerView === 'sync'}
+            onClick={() => setInnerView('sync')}
             icon={<svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" /></svg>}
           >Cloud Sync</SideNavItem>
           <SideNavItem
-            active={false}
-            onClick={() => setPage('convert')}
+            active={innerView === 'convert'}
+            onClick={() => setInnerView('convert')}
             icon={<svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z" /></svg>}
           >Convert</SideNavItem>
           <SideNavItem
-            active={false}
-            onClick={() => setPage('upgrade')}
+            active={innerView === 'settings'}
+            onClick={() => setInnerView('settings')}
             icon={<svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" /></svg>}
           >Settings</SideNavItem>
         </div>
@@ -304,7 +306,7 @@ export default function Dashboard({ setPage }) {
           flexShrink: 0, minHeight: '52px',
         }}>
           <span style={{ fontSize: '15px', fontWeight: 600, letterSpacing: '-0.2px', color: 'var(--text-primary)' }}>
-            {isRecentlyDeleted ? 'Trash' : 'Dashboard'}
+            {innerView === 'sync' ? 'Cloud Sync' : innerView === 'convert' ? 'Convert Audio' : innerView === 'settings' ? 'Settings' : innerView === 'projects' ? 'Projects' : innerView === 'tracks' ? 'Tracks' : isRecentlyDeleted ? 'Trash' : 'Dashboard'}
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             {/* Sync pill */}
@@ -367,8 +369,61 @@ export default function Dashboard({ setPage }) {
           </div>
         </div>
 
-        {/* Content scroll */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '32px' }}>
+        {/* Inner panels for non-dashboard views */}
+        {innerView === 'sync' && <SyncPanel BACKEND_URL={BACKEND_URL} getToken={getToken} />}
+        {innerView === 'convert' && <ConvertPanel BACKEND_URL={BACKEND_URL} getToken={getToken} />}
+        {innerView === 'settings' && <SettingsPanel user={user} getToken={getToken} BACKEND_URL={BACKEND_URL} logout={logout} setPage={setPage} />}
+        {innerView === 'projects' && (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '32px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '16px' }}>
+              {projects.filter(p => getExt(p) === 'flp').length === 0 ? (
+                <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '64px 0', color: 'var(--text-tertiary)', fontSize: '13px' }}>No FL Studio projects yet. Start syncing from the desktop app.</div>
+              ) : projects.filter(p => getExt(p) === 'flp').map((p, i) => (
+                <ProjectCard2 key={p.id} name={p.name || p.file_name || 'Untitled'} artGrad={ART_GRADS[i % ART_GRADS.length]} emoji={EMOJIS[i % EMOJIS.length]} meta={`${fmt(p.file_size)} · ${fmtAgo(p.updated_at || p.created_at)}`} />
+              ))}
+            </div>
+          </div>
+        )}
+        {innerView === 'tracks' && (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '32px' }}>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '14px', overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left', fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-tertiary)', padding: '12px 20px', borderBottom: '1px solid var(--border)' }}>Title</th>
+                    <th style={{ textAlign: 'left', fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-tertiary)', padding: '12px 20px', borderBottom: '1px solid var(--border)' }}>Format</th>
+                    <th style={{ textAlign: 'left', fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-tertiary)', padding: '12px 20px', borderBottom: '1px solid var(--border)' }}>Size</th>
+                    <th style={{ textAlign: 'left', fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-tertiary)', padding: '12px 20px', borderBottom: '1px solid var(--border)' }}>Synced</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr><td colSpan={4} style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>Loading…</td></tr>
+                  ) : projects.filter(p => ['wav','mp3','flac','ogg','aiff','m4a'].includes(getExt(p))).length === 0 ? (
+                    <tr><td colSpan={4} style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>No audio tracks yet. Open the desktop app to start syncing.</td></tr>
+                  ) : projects.filter(p => ['wav','mp3','flac','ogg','aiff','m4a'].includes(getExt(p))).map((p, i) => (
+                    <tr key={p.id} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.1s' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                      <td style={{ padding: '12px 20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div style={{ width: 32, height: 32, borderRadius: '6px', background: ART_GRADS[i % ART_GRADS.length], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>{EMOJIS[i % EMOJIS.length]}</div>
+                          <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{p.name || p.file_name || 'Untitled'}</span>
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 20px' }}><span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: '10px', fontWeight: 600, padding: '2px 7px', borderRadius: '999px', background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid var(--accent-line)' }}>{getExt(p).toUpperCase()}</span></td>
+                      <td style={{ padding: '12px 20px', fontFamily: 'JetBrains Mono,monospace', fontSize: '12px', color: 'var(--text-secondary)' }}>{fmt(p.file_size)}</td>
+                      <td style={{ padding: '12px 20px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{fmtAgo(p.updated_at || p.created_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Content scroll — only shown for dashboard/trash view */}
+        {(innerView === 'dashboard' || innerView === 'upgrade') && <div style={{ flex: 1, overflowY: 'auto', padding: '32px' }}>
 
           {/* Stats grid — shown only in main view */}
           {!isRecentlyDeleted && (
@@ -680,7 +735,7 @@ export default function Dashboard({ setPage }) {
               </button>
             </div>
           )}
-        </div>
+        </div>}
 
         {/* ── PLAYER BAR ── */}
         <div style={{
@@ -1008,5 +1063,254 @@ function CtxItem({ children, onClick, red }) {
       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
       {children}
     </button>
+  )
+}
+
+/* ── Inner Panel Components ── */
+
+function SyncPanel({ BACKEND_URL, getToken }) {
+  const [groups, setGroups] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [error, setError] = useState('')
+  const [showCreate, setShowCreate] = useState(false)
+
+  const fetchGroups = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/sync-groups`, { headers: { Authorization: `Bearer ${getToken()}` } })
+      const data = await res.json()
+      if (res.ok) setGroups(data.groups || [])
+    } catch {}
+    setLoading(false)
+  }
+
+  useEffect(() => { fetchGroups() }, [])
+
+  const handleCreate = async (e) => {
+    e.preventDefault()
+    if (!newName.trim()) return
+    setCreating(true)
+    setError('')
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/sync-groups`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName.trim() })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to create group')
+      setGroups(g => [data.group, ...g])
+      setNewName('')
+      setShowCreate(false)
+    } catch (err) { setError(err.message) }
+    setCreating(false)
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '32px' }}>
+      <div style={{ maxWidth: 640 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+          <div>
+            <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>Cloud Sync Groups</h2>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Organize files into sync groups for easy sharing and collaboration.</p>
+          </div>
+          <button onClick={() => setShowCreate(s => !s)} style={{ padding: '7px 14px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, background: 'var(--accent)', color: '#0A0A0F', border: 'none', cursor: 'pointer' }}>
+            + New Group
+          </button>
+        </div>
+
+        {showCreate && (
+          <form onSubmit={handleCreate} style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+            <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Group name…" autoFocus style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', background: 'var(--bg-input)', border: '1px solid var(--border-mid)', color: 'var(--text-primary)', outline: 'none', fontSize: '13px', fontFamily: 'inherit' }} />
+            <button type="submit" disabled={creating} style={{ padding: '8px 16px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, background: 'var(--accent)', color: '#0A0A0F', border: 'none', cursor: creating ? 'not-allowed' : 'pointer', opacity: creating ? 0.6 : 1 }}>
+              {creating ? 'Creating…' : 'Create'}
+            </button>
+          </form>
+        )}
+
+        {error && <div style={{ fontSize: '13px', color: 'var(--red)', marginBottom: '12px' }}>{error}</div>}
+
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '48px', color: 'var(--text-tertiary)', fontSize: '13px' }}>Loading…</div>
+        ) : groups.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '64px', color: 'var(--text-tertiary)', fontSize: '13px' }}>No sync groups yet. Create one above to get started.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {groups.map(g => (
+              <div key={g.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '10px', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '2px' }}>{g.name}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{g.member_count || 0} member{g.member_count !== 1 ? 's' : ''} · {g.file_count || 0} file{g.file_count !== 1 ? 's' : ''}</div>
+                </div>
+                <button style={{ padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, background: 'transparent', color: 'var(--accent)', border: '1px solid var(--border-mid)', cursor: 'pointer' }}>Open</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ConvertPanel({ BACKEND_URL, getToken }) {
+  const [file, setFile] = useState(null)
+  const [format, setFormat] = useState('mp3')
+  const [uploading, setUploading] = useState(false)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState('')
+  const [dragActive, setDragActive] = useState(false)
+  const inputRef = useRef()
+
+  const handleConvert = async () => {
+    if (!file) return
+    setUploading(true); setError(''); setResult(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('format', format)
+      const res = await fetch(`${BACKEND_URL}/api/convert`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+        body: fd
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Conversion failed')
+      setResult(data)
+    } catch (err) { setError(err.message) }
+    setUploading(false)
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '32px' }}>
+      <div style={{ maxWidth: 560 }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>Convert Audio</h2>
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '24px' }}>Upload a WAV or MP3 and convert it to your desired format.</p>
+
+        <div
+          style={{ border: `2px dashed ${dragActive ? 'var(--accent)' : 'var(--border-mid)'}`, borderRadius: '12px', padding: '40px', textAlign: 'center', cursor: 'pointer', transition: 'border-color 0.15s', marginBottom: '16px' }}
+          onDragOver={e => { e.preventDefault(); setDragActive(true) }}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={e => { e.preventDefault(); setDragActive(false); const f = e.dataTransfer.files[0]; if (f) setFile(f) }}
+          onClick={() => inputRef.current?.click()}>
+          <input ref={inputRef} type="file" accept=".wav,.mp3,.flac" style={{ display: 'none' }} onChange={e => setFile(e.target.files[0])} />
+          {file ? (
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{file.name}</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' }}>{(file.size / (1024 * 1024)).toFixed(2)} MB — click to change</div>
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Drop a file here or <span style={{ color: 'var(--accent)' }}>browse</span></div>
+              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' }}>WAV, MP3, FLAC supported</div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '10px', padding: '16px', marginBottom: '16px' }}>
+          <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Output Format</div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {['mp3', 'wav'].map(f => (
+              <button key={f} onClick={() => setFormat(f)} style={{ padding: '6px 16px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', border: 'none', background: format === f ? 'var(--accent)' : 'var(--bg-hover)', color: format === f ? '#0A0A0F' : 'var(--text-secondary)', transition: 'all 0.12s', fontFamily: 'inherit' }}>
+                {f.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {error && <div style={{ fontSize: '13px', color: 'var(--red)', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '6px', padding: '10px 14px', marginBottom: '12px' }}>{error}</div>}
+
+        <button onClick={handleConvert} disabled={!file || uploading} style={{ width: '100%', padding: '10px', borderRadius: '8px', fontSize: '14px', fontWeight: 600, background: 'var(--accent)', color: '#0A0A0F', border: 'none', cursor: !file || uploading ? 'not-allowed' : 'pointer', opacity: !file || uploading ? 0.6 : 1, transition: 'opacity 0.12s', fontFamily: 'inherit' }}>
+          {uploading ? 'Converting…' : `Convert to ${format.toUpperCase()}`}
+        </button>
+
+        {result && result.url && (
+          <div style={{ marginTop: '16px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '10px', padding: '16px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--green)', fontWeight: 600, marginBottom: '8px' }}>Conversion complete</div>
+            <a href={result.url} download style={{ fontSize: '13px', color: 'var(--accent)' }}>Download converted file</a>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SettingsPanel({ user, getToken, BACKEND_URL, logout, setPage }) {
+  const token = getToken()
+  const appVersion = '1.0.0'
+  const watchFolder = 'Documents/Image-Line/FL Studio/Projects'
+  const syncInterval = '5 minutes'
+
+  const handleLogout = () => {
+    logout()
+    setPage('home')
+  }
+
+  const copyToken = () => {
+    if (token) navigator.clipboard.writeText(token)
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '32px' }}>
+      <div style={{ maxWidth: 560 }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>Settings</h2>
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '28px' }}>Manage your account and sync preferences.</p>
+
+        {/* Account section */}
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '14px' }}>Account</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+            <div style={{ width: 40, height: 40, borderRadius: '8px', background: 'linear-gradient(135deg,#1E4268,#C9A84C)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: 700, color: '#0A0A0F' }}>
+              {(user?.name || user?.email || 'U')[0].toUpperCase()}
+            </div>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{user?.name || 'Account'}</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{user?.email || ''}</div>
+            </div>
+          </div>
+          <button onClick={handleLogout} style={{ padding: '6px 14px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, background: 'transparent', color: 'var(--red)', border: '1px solid rgba(239,68,68,0.3)', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.12s' }}>
+            Sign Out
+          </button>
+        </div>
+
+        {/* Sync settings */}
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '14px' }}>Sync</div>
+          <SettingsRow label="Watch Folder" value={watchFolder} />
+          <SettingsRow label="Sync Interval" value={syncInterval} />
+        </div>
+
+        {/* Auth token */}
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '14px' }}>Auth Token</div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div style={{ flex: 1, fontFamily: 'JetBrains Mono,monospace', fontSize: '11px', color: 'var(--text-secondary)', background: 'var(--bg-input)', border: '1px solid var(--border-mid)', borderRadius: '6px', padding: '8px 12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {token ? token.slice(0, 40) + '…' : 'Not signed in'}
+            </div>
+            {token && (
+              <button onClick={copyToken} style={{ padding: '7px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, background: 'var(--accent)', color: '#0A0A0F', border: 'none', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>Copy</button>
+            )}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '8px' }}>Used by the desktop app to authenticate sync uploads.</div>
+        </div>
+
+        {/* App info */}
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', padding: '20px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '14px' }}>About</div>
+          <SettingsRow label="App Version" value={`v${appVersion}`} />
+          <SettingsRow label="Backend" value="soundbridg-backend.onrender.com" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SettingsRow({ label, value }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+      <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{label}</span>
+      <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500, fontFamily: label === 'Watch Folder' || label === 'Auth Token' || label === 'Backend' ? 'JetBrains Mono,monospace' : 'inherit' }}>{value}</span>
+    </div>
   )
 }
