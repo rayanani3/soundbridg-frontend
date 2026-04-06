@@ -24,17 +24,35 @@ export default function Convert() {
     setError('')
     setResult(null)
     try {
+      // Step 1: upload the source file
       const fd = new FormData()
       fd.append('file', file)
-      fd.append('format', format)
-      const res = await fetch(`${BACKEND_URL}/api/convert`, {
+      fd.append('title', file.name.replace(/\.[^.]+$/, ''))
+      const uploadRes = await fetch(`${BACKEND_URL}/api/tracks/upload`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${getToken()}` },
         body: fd
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Conversion failed')
-      setResult(data)
+      const uploadData = await uploadRes.json()
+      if (!uploadRes.ok) throw new Error(uploadData.error || 'Upload failed')
+
+      // Step 2: convert the uploaded track
+      const convertRes = await fetch(`${BACKEND_URL}/api/tracks/${uploadData.id}/convert`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ format })
+      })
+      const convertData = await convertRes.json()
+      if (!convertRes.ok) throw new Error(convertData.error || 'Conversion failed')
+
+      // Step 3: get a signed download URL for the converted file
+      const dlRes = await fetch(`${BACKEND_URL}/api/tracks/${convertData.id}/download`, {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      })
+      const dlData = await dlRes.json()
+      if (!dlRes.ok) throw new Error(dlData.error || 'Could not get download URL')
+
+      setResult({ url: dlData.download_url, filename: dlData.filename })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -102,7 +120,7 @@ export default function Convert() {
         {uploading ? (
           <span className="flex items-center justify-center gap-2">
             <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-            Converting...
+            Uploading &amp; converting…
           </span>
         ) : `Convert to ${format.toUpperCase()}`}
       </button>
@@ -114,9 +132,9 @@ export default function Convert() {
             Conversion complete
           </p>
           {result.url && (
-            <a href={result.url} download className="flex items-center gap-2 text-brand-gold hover:underline text-sm">
+            <a href={result.url} download={result.filename} className="flex items-center gap-2 text-brand-gold hover:underline text-sm">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-              Download converted file
+              Download {result.filename || 'converted file'}
             </a>
           )}
         </div>

@@ -24,7 +24,32 @@ export default function Dashboard({ setPage }) {
   const [contextMenu, setContextMenu] = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [playerPlaying, setPlayerPlaying] = useState(false)
+  const [uploadingTrack, setUploadingTrack] = useState(false)
   const editRef = useRef()
+  const uploadRef = useRef()
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setUploadingTrack(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('title', file.name.replace(/\.[^.]+$/, ''))
+      const res = await fetch(`${BACKEND_URL}/api/tracks/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+        body: fd
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Upload failed')
+      fetchProjects()
+    } catch (err) {
+      setError(err.message)
+    }
+    setUploadingTrack(false)
+  }
 
   useEffect(() => { fetchProjects(); fetchRecentlyDeleted() }, [])
   useEffect(() => {
@@ -354,17 +379,35 @@ export default function Dashboard({ setPage }) {
               <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
             </button>
             {/* Upload */}
-            <button style={{
-              display: 'inline-flex', alignItems: 'center', gap: '6px',
-              border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
-              cursor: 'pointer', padding: '7px 14px',
-              background: 'var(--accent)', color: '#0A0A0F',
-              transition: 'background 0.12s',
-            }}
-              onMouseEnter={e => e.currentTarget.style.background = '#d4b560'}
+            <input
+              ref={uploadRef}
+              type="file"
+              accept=".mp3,.wav,.flac,.flp"
+              style={{ display: 'none' }}
+              onChange={handleUpload}
+            />
+            <button
+              onClick={() => uploadRef.current?.click()}
+              disabled={uploadingTrack}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '6px',
+                border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600,
+                cursor: uploadingTrack ? 'not-allowed' : 'pointer', padding: '7px 14px',
+                background: 'var(--accent)', color: '#0A0A0F',
+                opacity: uploadingTrack ? 0.6 : 1,
+                transition: 'background 0.12s, opacity 0.12s',
+              }}
+              onMouseEnter={e => { if (!uploadingTrack) e.currentTarget.style.background = '#d4b560' }}
               onMouseLeave={e => e.currentTarget.style.background = 'var(--accent)'}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg>
-              Upload
+              {uploadingTrack ? (
+                <svg width="14" height="14" fill="none" viewBox="0 0 24 24" style={{ animation: 'spin 1s linear infinite' }}>
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" opacity="0.25" />
+                  <path fill="currentColor" opacity="0.75" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg>
+              )}
+              {uploadingTrack ? 'Uploading…' : 'Upload'}
             </button>
           </div>
         </div>
@@ -1167,17 +1210,35 @@ function ConvertPanel({ BACKEND_URL, getToken }) {
     if (!file) return
     setUploading(true); setError(''); setResult(null)
     try {
+      // Step 1: upload the source file
       const fd = new FormData()
       fd.append('file', file)
-      fd.append('format', format)
-      const res = await fetch(`${BACKEND_URL}/api/convert`, {
+      fd.append('title', file.name.replace(/\.[^.]+$/, ''))
+      const uploadRes = await fetch(`${BACKEND_URL}/api/tracks/upload`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${getToken()}` },
         body: fd
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Conversion failed')
-      setResult(data)
+      const uploadData = await uploadRes.json()
+      if (!uploadRes.ok) throw new Error(uploadData.error || 'Upload failed')
+
+      // Step 2: convert the uploaded track
+      const convertRes = await fetch(`${BACKEND_URL}/api/tracks/${uploadData.id}/convert`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ format })
+      })
+      const convertData = await convertRes.json()
+      if (!convertRes.ok) throw new Error(convertData.error || 'Conversion failed')
+
+      // Step 3: get a signed download URL for the converted file
+      const dlRes = await fetch(`${BACKEND_URL}/api/tracks/${convertData.id}/download`, {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      })
+      const dlData = await dlRes.json()
+      if (!dlRes.ok) throw new Error(dlData.error || 'Could not get download URL')
+
+      setResult({ url: dlData.download_url, filename: dlData.filename })
     } catch (err) { setError(err.message) }
     setUploading(false)
   }
@@ -1222,13 +1283,13 @@ function ConvertPanel({ BACKEND_URL, getToken }) {
         {error && <div style={{ fontSize: '13px', color: 'var(--red)', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '6px', padding: '10px 14px', marginBottom: '12px' }}>{error}</div>}
 
         <button onClick={handleConvert} disabled={!file || uploading} style={{ width: '100%', padding: '10px', borderRadius: '8px', fontSize: '14px', fontWeight: 600, background: 'var(--accent)', color: '#0A0A0F', border: 'none', cursor: !file || uploading ? 'not-allowed' : 'pointer', opacity: !file || uploading ? 0.6 : 1, transition: 'opacity 0.12s', fontFamily: 'inherit' }}>
-          {uploading ? 'Converting…' : `Convert to ${format.toUpperCase()}`}
+          {uploading ? 'Uploading & converting…' : `Convert to ${format.toUpperCase()}`}
         </button>
 
         {result && result.url && (
           <div style={{ marginTop: '16px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '10px', padding: '16px' }}>
             <div style={{ fontSize: '13px', color: 'var(--green)', fontWeight: 600, marginBottom: '8px' }}>Conversion complete</div>
-            <a href={result.url} download style={{ fontSize: '13px', color: 'var(--accent)' }}>Download converted file</a>
+            <a href={result.url} download={result.filename} style={{ fontSize: '13px', color: 'var(--accent)' }}>Download {result.filename || 'converted file'}</a>
           </div>
         )}
       </div>
