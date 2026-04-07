@@ -10,19 +10,21 @@ export default function Player() {
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(0.8)
+  const [loadingTrack, setLoadingTrack] = useState(false)
   const audioRef = useRef(null)
 
   useEffect(() => {
     const fetchTracks = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/projects`, {
+        const res = await fetch(`${BACKEND_URL}/api/tracks`, {
           headers: { Authorization: `Bearer ${getToken()}` }
         })
         const data = await res.json()
         if (res.ok) {
-          const audio = (data.projects || []).filter(p =>
-            p.file_url && (p.file_url.endsWith('.mp3') || p.file_url.endsWith('.wav') || p.name?.match(/\.(mp3|wav)$/i))
-          )
+          // Only show streamable audio formats
+          const audio = Array.isArray(data)
+            ? data.filter(p => ['mp3', 'wav', 'flac', 'ogg', 'aiff', 'm4a'].includes(p.format?.toLowerCase()))
+            : []
           setTracks(audio)
         }
       } catch {}
@@ -47,26 +49,46 @@ export default function Player() {
     }
   }, [])
 
-  const playTrack = (track) => {
+  const playTrack = async (track) => {
     const audio = audioRef.current
     if (!audio) return
+
+    // Toggle play/pause on same track
     if (current?.id === track.id) {
       if (playing) { audio.pause(); setPlaying(false) }
-      else { audio.play(); setPlaying(true) }
+      else { audio.play().catch(() => {}); setPlaying(true) }
       return
     }
+
+    audio.pause()
     setCurrent(track)
+    setPlaying(false)
     setProgress(0)
-    audio.src = track.file_url
-    audio.volume = volume
-    audio.play().then(() => setPlaying(true)).catch(() => {})
+    setLoadingTrack(true)
+
+    try {
+      // Fetch signed stream URL from backend
+      const res = await fetch(`${BACKEND_URL}/api/tracks/${track.id}/stream`, {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      })
+      const data = await res.json()
+      if (!res.ok || !data.stream_url) throw new Error('No stream URL')
+      audio.src = data.stream_url
+      audio.volume = volume
+      audio.load()
+      await audio.play()
+      setPlaying(true)
+    } catch {
+      setCurrent(null)
+    }
+    setLoadingTrack(false)
   }
 
   const togglePlay = () => {
     const audio = audioRef.current
     if (!audio || !current) return
     if (playing) { audio.pause(); setPlaying(false) }
-    else { audio.play(); setPlaying(true) }
+    else { audio.play().catch(() => {}); setPlaying(true) }
   }
 
   const seek = (e) => {
@@ -88,7 +110,7 @@ export default function Player() {
     <div className="max-w-3xl mx-auto px-4 py-10">
       <div className="mb-8">
         <h1 className="font-display font-bold text-3xl mb-2">Audio Player</h1>
-        <p className="text-white/50 text-sm">Preview your converted exports.</p>
+        <p className="text-white/50 text-sm">Preview your synced and converted tracks.</p>
       </div>
 
       <audio ref={audioRef} />
@@ -98,11 +120,13 @@ export default function Player() {
         <div className="glass rounded-2xl p-6 mb-6">
           <div className="flex items-center gap-3 mb-5">
             <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{background:'rgba(201,168,76,0.15)', border:'1px solid rgba(201,168,76,0.25)'}}>
-              <svg className={`w-6 h-6 text-brand-gold ${playing ? 'animate-pulse' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19V6l12-2v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-2c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-2"/></svg>
+              <svg className={`w-6 h-6 text-brand-gold ${playing ? 'animate-pulse' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19V6l12-2v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-2c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-2"/>
+              </svg>
             </div>
             <div className="min-w-0">
-              <p className="font-semibold truncate">{current.name || current.file_name}</p>
-              <p className="text-xs text-white/40">{playing ? 'Playing' : 'Paused'}</p>
+              <p className="font-semibold truncate">{current.title || current.filename || 'Untitled'}</p>
+              <p className="text-xs text-white/40">{loadingTrack ? 'Loading…' : playing ? 'Playing' : 'Paused'} · {current.format?.toUpperCase()}</p>
             </div>
           </div>
 
@@ -126,8 +150,10 @@ export default function Player() {
 
           {/* Controls */}
           <div className="flex items-center justify-center gap-4">
-            <button onClick={togglePlay} className="w-12 h-12 rounded-full flex items-center justify-center bg-brand-gold text-brand-dark hover:brightness-110 transition-all">
-              {playing ? (
+            <button onClick={togglePlay} disabled={loadingTrack} className="w-12 h-12 rounded-full flex items-center justify-center bg-brand-gold text-brand-dark hover:brightness-110 transition-all disabled:opacity-50">
+              {loadingTrack ? (
+                <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+              ) : playing ? (
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
               ) : (
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
@@ -137,11 +163,13 @@ export default function Player() {
 
           {/* Volume */}
           <div className="flex items-center gap-2 mt-4">
-            <svg className="w-4 h-4 text-white/40 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-9.536a5 5 0 000 7.072"/></svg>
+            <svg className="w-4 h-4 text-white/40 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-9.536a5 5 0 000 7.072"/>
+            </svg>
             <input
               type="range" min="0" max="1" step="0.05" value={volume}
               onChange={e => { const v = parseFloat(e.target.value); setVolume(v); if (audioRef.current) audioRef.current.volume = v }}
-              className="flex-1 h-1 rounded-full accent-brand-gold appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-brand-gold"
+              className="flex-1 h-1 rounded-full accent-brand-gold"
               style={{background:`linear-gradient(to right, #c9a84c ${volume*100}%, rgba(27,58,92,0.5) ${volume*100}%)`}}
             />
           </div>
@@ -157,10 +185,12 @@ export default function Player() {
       ) : tracks.length === 0 ? (
         <div className="glass rounded-2xl p-12 text-center">
           <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{background:'rgba(201,168,76,0.1)', border:'1px solid rgba(201,168,76,0.2)'}}>
-            <svg className="w-7 h-7 text-brand-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19V6l12-2v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-2c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-2"/></svg>
+            <svg className="w-7 h-7 text-brand-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19V6l12-2v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-2c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-2"/>
+            </svg>
           </div>
           <h3 className="font-display font-semibold text-lg mb-2">No audio files yet</h3>
-          <p className="text-white/50 text-sm">Convert a project to MP3 or WAV and it'll show up here.</p>
+          <p className="text-white/50 text-sm">Upload or sync MP3/WAV files and they'll appear here.</p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -171,18 +201,25 @@ export default function Player() {
               className={`w-full text-left glass rounded-xl p-4 flex items-center gap-3 transition-colors ${current?.id === t.id ? 'border-brand-gold/30' : 'hover:border-brand-gold/20'}`}
             >
               <div className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${current?.id === t.id ? 'bg-brand-gold' : 'bg-brand-ocean/30'}`}>
-                {current?.id === t.id && playing ? (
+                {current?.id === t.id && (loadingTrack ? (
+                  <svg className="w-4 h-4 text-brand-dark animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                ) : playing ? (
                   <svg className="w-4 h-4 text-brand-dark" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
                 ) : (
-                  <svg className={`w-4 h-4 ${current?.id === t.id ? 'text-brand-dark' : 'text-brand-gold'}`} fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                  <svg className="w-4 h-4 text-brand-dark" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                ))}
+                {current?.id !== t.id && (
+                  <svg className="w-4 h-4 text-brand-gold" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                 )}
               </div>
-              <div className="min-w-0">
-                <p className="font-medium text-sm truncate">{t.name || t.file_name}</p>
-                <p className="text-xs text-white/40 mt-0.5">{t.file_url?.split('.').pop()?.toUpperCase()}</p>
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-sm truncate">{t.title || t.filename || 'Untitled'}</p>
+                <p className="text-xs text-white/40 mt-0.5">{t.format?.toUpperCase()} · {t.size ? `${(t.size / (1024*1024)).toFixed(1)} MB` : '—'}</p>
               </div>
               {current?.id === t.id && (
-                <span className="ml-auto text-xs text-brand-gold font-medium">{playing ? 'Now playing' : 'Paused'}</span>
+                <span className="ml-auto text-xs text-brand-gold font-medium shrink-0">
+                  {loadingTrack ? 'Loading…' : playing ? 'Now playing' : 'Paused'}
+                </span>
               )}
             </button>
           ))}

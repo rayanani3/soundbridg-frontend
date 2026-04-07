@@ -23,10 +23,57 @@ export default function Dashboard({ setPage }) {
   const [editingName, setEditingName] = useState('')
   const [contextMenu, setContextMenu] = useState(null)
   const [deleting, setDeleting] = useState(null)
-  const [playerPlaying, setPlayerPlaying] = useState(false)
   const [uploadingTrack, setUploadingTrack] = useState(false)
+  const [currentTrack, setCurrentTrack] = useState(null)
+  const [audioPlaying, setAudioPlaying] = useState(false)
   const editRef = useRef()
   const uploadRef = useRef()
+  const audioRef = useRef(null)
+
+  // Create the audio element once on mount
+  useEffect(() => {
+    const audio = new Audio()
+    audioRef.current = audio
+    audio.addEventListener('ended', () => setAudioPlaying(false))
+    audio.addEventListener('pause', () => setAudioPlaying(false))
+    audio.addEventListener('play', () => setAudioPlaying(true))
+    return () => {
+      audio.pause()
+      audio.src = ''
+    }
+  }, [])
+
+  const selectTrack = async (track) => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (track.format === 'flp') return // can't stream FLP files
+
+    // Same track: toggle play/pause
+    if (currentTrack?.id === track.id) {
+      if (audioPlaying) { audio.pause() } else { audio.play().catch(() => {}) }
+      return
+    }
+
+    audio.pause()
+    setCurrentTrack(track)
+    setAudioPlaying(false)
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/tracks/${track.id}/stream`, {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      })
+      const data = await res.json()
+      if (!res.ok || !data.stream_url) throw new Error('No stream URL')
+      audio.src = data.stream_url
+      audio.load()
+      audio.play().then(() => setAudioPlaying(true)).catch(() => {})
+    } catch { setCurrentTrack(null) }
+  }
+
+  const togglePlayPause = () => {
+    const audio = audioRef.current
+    if (!audio || !currentTrack) return
+    if (audioPlaying) { audio.pause() } else { audio.play().catch(() => {}) }
+  }
 
   const handleUpload = async (e) => {
     const file = e.target.files?.[0]
@@ -403,7 +450,7 @@ export default function Dashboard({ setPage }) {
 
         {/* Inner panels for non-dashboard views */}
         {innerView === 'sync' && <SyncPanel BACKEND_URL={BACKEND_URL} getToken={getToken} />}
-        {innerView === 'convert' && <ConvertPanel BACKEND_URL={BACKEND_URL} getToken={getToken} />}
+        {innerView === 'convert' && <ConvertPanel BACKEND_URL={BACKEND_URL} getToken={getToken} onSuccess={fetchProjects} />}
         {innerView === 'settings' && <SettingsPanel user={user} getToken={getToken} BACKEND_URL={BACKEND_URL} logout={logout} setPage={setPage} />}
         {innerView === 'projects' && (
           <div style={{ flex: 1, overflowY: 'auto', padding: '32px' }}>
@@ -570,16 +617,22 @@ export default function Dashboard({ setPage }) {
                   const artGrad = ART_GRADS[i % ART_GRADS.length]
                   const emoji = EMOJIS[i % EMOJIS.length]
 
+                  const isCurrentTrack = currentTrack?.id === p.id
                   return (
                     <tr key={p.id}
                       onContextMenu={e => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, type: 'file', project: p }) }}
-                      style={{ borderBottom: i < filtered.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer', transition: 'background 0.1s' }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                      onClick={() => selectTrack(p)}
+                      style={{ borderBottom: i < filtered.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer', transition: 'background 0.1s', background: isCurrentTrack ? 'var(--accent-dim)' : 'transparent' }}
+                      onMouseEnter={e => { if (!isCurrentTrack) e.currentTarget.style.background = 'var(--bg-hover)' }}
+                      onMouseLeave={e => { if (!isCurrentTrack) e.currentTarget.style.background = 'transparent' }}>
 
-                      {/* # */}
-                      <td style={{ padding: '12px 20px', fontFamily: 'JetBrains Mono,monospace', fontSize: '12px', color: 'var(--text-tertiary)', width: 36, textAlign: 'center' }}>
-                        {i + 1}
+                      {/* # / play indicator */}
+                      <td style={{ padding: '12px 20px', fontFamily: 'JetBrains Mono,monospace', fontSize: '12px', color: isCurrentTrack ? 'var(--accent)' : 'var(--text-tertiary)', width: 36, textAlign: 'center' }}>
+                        {isCurrentTrack && audioPlaying
+                          ? <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+                          : isCurrentTrack
+                            ? <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                            : i + 1}
                       </td>
 
                       {/* Title */}
@@ -769,22 +822,22 @@ export default function Dashboard({ setPage }) {
           display: 'flex', alignItems: 'center',
           padding: '0 24px', height: '72px', flexShrink: 0, gap: '16px',
         }}>
-          {/* Track */}
+          {/* Track info */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '240px', flexShrink: 0 }}>
             <div style={{
               width: 44, height: 44, borderRadius: '6px', flexShrink: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: '20px', border: '1px solid var(--border)',
-              background: ART_GRADS[0],
+              background: currentTrack ? ART_GRADS[projects.indexOf(currentTrack) % ART_GRADS.length] : ART_GRADS[0],
             }}>
-              {recentProject ? EMOJIS[0] : '🎵'}
+              {currentTrack ? EMOJIS[projects.indexOf(currentTrack) % EMOJIS.length] : '🎵'}
             </div>
-            <div>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--accent)' }}>
-                {recentProject ? (recentProject.title || recentProject.filename || 'Untitled').slice(0, 22) : 'No track playing'}
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: currentTrack ? 'var(--accent)' : 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {currentTrack ? (currentTrack.title || currentTrack.filename || 'Untitled').slice(0, 22) : 'Click a track to play'}
               </div>
               <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginTop: '1px' }}>
-                {user?.name || 'SoundBridg'}
+                {currentTrack ? (currentTrack.format?.toUpperCase() || '—') : '—'}
               </div>
             </div>
           </div>
@@ -792,28 +845,27 @@ export default function Dashboard({ setPage }) {
           {/* Controls */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <PlayerCtrlBtn><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z" /></svg></PlayerCtrlBtn>
               <PlayerCtrlBtn><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" /></svg></PlayerCtrlBtn>
-              <button onClick={() => setPlayerPlaying(p => !p)} style={{
+              <button onClick={togglePlayPause} disabled={!currentTrack} style={{
                 width: 34, height: 34, borderRadius: '50%',
-                background: 'var(--text-primary)', border: 'none', cursor: 'pointer',
+                background: currentTrack ? 'var(--text-primary)' : 'var(--border-mid)',
+                border: 'none', cursor: currentTrack ? 'pointer' : 'default',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 color: 'var(--bg)', transition: 'background 0.1s,transform 0.1s', flexShrink: 0,
               }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent)'; e.currentTarget.style.transform = 'scale(1.04)' }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'var(--text-primary)'; e.currentTarget.style.transform = 'scale(1)' }}>
-                {playerPlaying
+                onMouseEnter={e => { if (currentTrack) { e.currentTarget.style.background = 'var(--accent)'; e.currentTarget.style.transform = 'scale(1.04)' } }}
+                onMouseLeave={e => { if (currentTrack) { e.currentTarget.style.background = 'var(--text-primary)'; e.currentTarget.style.transform = 'scale(1)' } }}>
+                {audioPlaying
                   ? <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
                   : <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
                 }
               </button>
               <PlayerCtrlBtn><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg></PlayerCtrlBtn>
-              <PlayerCtrlBtn><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z" /></svg></PlayerCtrlBtn>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '100%', maxWidth: '480px' }}>
               <span style={{ fontSize: '11px', fontFamily: 'JetBrains Mono,monospace', color: 'var(--text-tertiary)', minWidth: '32px' }}>0:00</span>
-              <div style={{ flex: 1, height: 3, background: 'var(--border-mid)', borderRadius: '2px', cursor: 'pointer' }}>
-                <div style={{ height: '100%', width: '0%', background: 'var(--text-secondary)', borderRadius: '2px' }} />
+              <div style={{ flex: 1, height: 3, background: 'var(--border-mid)', borderRadius: '2px' }}>
+                <div style={{ height: '100%', width: audioPlaying ? '30%' : '0%', background: 'var(--accent)', borderRadius: '2px', transition: 'width 0.3s' }} />
               </div>
               <span style={{ fontSize: '11px', fontFamily: 'JetBrains Mono,monospace', color: 'var(--text-tertiary)', minWidth: '32px', textAlign: 'right' }}>0:00</span>
             </div>
@@ -1101,32 +1153,20 @@ function SyncPanel({ BACKEND_URL, getToken }) {
   const fetchGroups = async () => {
     setLoading(true)
     try {
-      const res = await fetch(`${BACKEND_URL}/api/sync-groups`, { headers: { Authorization: `Bearer ${getToken()}` } })
+      // Backend groups tracks by sync_group via /api/tracks/grouped
+      const res = await fetch(`${BACKEND_URL}/api/tracks/grouped`, { headers: { Authorization: `Bearer ${getToken()}` } })
       const data = await res.json()
-      if (res.ok) setGroups(data.groups || [])
+      if (res.ok) setGroups(Array.isArray(data) ? data : [])
     } catch {}
     setLoading(false)
   }
 
   useEffect(() => { fetchGroups() }, [])
 
+  // No create-group endpoint — groups are created automatically by the desktop sync
   const handleCreate = async (e) => {
     e.preventDefault()
-    if (!newName.trim()) return
-    setCreating(true)
-    setError('')
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/sync-groups`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim() })
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to create group')
-      setGroups(g => [data.group, ...g])
-      setNewName('')
-      setShowCreate(false)
-    } catch (err) { setError(err.message) }
+    setError('Sync groups are created automatically when you sync from the desktop app.')
     setCreating(false)
   }
 
@@ -1161,12 +1201,16 @@ function SyncPanel({ BACKEND_URL, getToken }) {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {groups.map(g => (
-              <div key={g.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '10px', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div key={g.sync_group} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '10px', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div>
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '2px' }}>{g.name}</div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{g.member_count || 0} member{g.member_count !== 1 ? 's' : ''} · {g.file_count || 0} file{g.file_count !== 1 ? 's' : ''}</div>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '2px' }}>{g.sync_group}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                    {(g.files || []).length} file{(g.files || []).length !== 1 ? 's' : ''} · {g.files?.map(f => f.format?.toUpperCase()).filter(Boolean).join(', ') || '—'}
+                  </div>
                 </div>
-                <button style={{ padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, background: 'transparent', color: 'var(--accent)', border: '1px solid var(--border-mid)', cursor: 'pointer' }}>Open</button>
+                <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                  {g.updated_at ? new Date(g.updated_at).toLocaleDateString() : ''}
+                </span>
               </div>
             ))}
           </div>
@@ -1176,7 +1220,7 @@ function SyncPanel({ BACKEND_URL, getToken }) {
   )
 }
 
-function ConvertPanel({ BACKEND_URL, getToken }) {
+function ConvertPanel({ BACKEND_URL, getToken, onSuccess }) {
   const [file, setFile] = useState(null)
   const [format, setFormat] = useState('mp3')
   const [uploading, setUploading] = useState(false)
@@ -1218,6 +1262,7 @@ function ConvertPanel({ BACKEND_URL, getToken }) {
       if (!dlRes.ok) throw new Error(dlData.error || 'Could not get download URL')
 
       setResult({ url: dlData.download_url, filename: dlData.filename })
+      if (onSuccess) onSuccess() // refresh track list
     } catch (err) { setError(err.message) }
     setUploading(false)
   }
