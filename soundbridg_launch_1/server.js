@@ -278,7 +278,7 @@ app.post('/api/tracks/upload', authMiddleware, upload.single('file'), async (req
 app.get('/api/tracks', authMiddleware, async (req, res) => {
   try {
     const { sort = 'newest', q, daw, period, folder_id, format } = req.query;
-    let query = supabase.from('tracks').select('*').eq('user_id', req.user.id);
+    let query = supabase.from('tracks').select('*').eq('user_id', req.user.id).is('deleted_at', null);
     if (q?.trim()) query = query.ilike('title', `%${q.trim()}%`);
     if (daw && daw !== 'all') query = query.eq('daw', daw);
     if (format && format !== 'all') query = query.eq('format', format);
@@ -302,7 +302,7 @@ app.get('/api/tracks', authMiddleware, async (req, res) => {
 
 app.get('/api/tracks/grouped', authMiddleware, async (req, res) => {
   try {
-    const { data, error } = await supabase.from('tracks').select('*').eq('user_id', req.user.id).order('created_at', { ascending: false });
+    const { data, error } = await supabase.from('tracks').select('*').eq('user_id', req.user.id).is('deleted_at', null).order('created_at', { ascending: false });
     if (error) throw error;
     const groups = {};
     for (const track of (data || [])) {
@@ -313,6 +313,67 @@ app.get('/api/tracks/grouped', authMiddleware, async (req, res) => {
     }
     res.json(Object.values(groups).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)));
   } catch (err) { res.status(500).json({ error: 'Failed to fetch grouped tracks' }); }
+});
+
+app.get('/api/sync-groups', authMiddleware, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('sync_groups').select('*').eq('user_id', req.user.id).order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ groups: data || [] });
+  } catch (err) { res.status(500).json({ error: 'Failed to fetch sync groups' }); }
+});
+
+app.post('/api/sync-groups', authMiddleware, async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: 'Name required' });
+    const invite_code = crypto.randomBytes(4).toString('hex'); // 8 hex chars
+    const { data, error } = await supabase.from('sync_groups').insert({ user_id: req.user.id, name: name.trim(), invite_code }).select().single();
+    if (error) return res.status(500).json({ error: `Database error: ${error.message}` });
+    res.status(201).json({ group: data });
+  } catch (err) { res.status(500).json({ error: 'Failed to create sync group' }); }
+});
+
+// Guest: look up a sync group by invite code (no auth)
+app.get('/api/sync-groups/invite/:invite_code', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('sync_groups').select('id, name').eq('invite_code', req.params.invite_code).single();
+    if (error || !data) return res.status(404).json({ error: 'Invite code not found' });
+    res.json({ group: data });
+  } catch (err) { res.status(500).json({ error: 'Failed to look up invite code' }); }
+});
+
+// Guest: upload a track to a sync group via invite code (no auth)
+app.post('/api/sync-groups/:invite_code/upload', upload.single('file'), async (req, res) => {
+  const tmpPath = req.file?.path;
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file provided' });
+    const { data: group, error: groupErr } = await supabase.from('sync_groups').select('id, user_id, name').eq('invite_code', req.params.invite_code).single();
+    if (groupErr || !group) return res.status(404).json({ error: 'Invite code not found' });
+
+    const trackId = uuidv4();
+    const ext = path.extname(req.file.originalname).toLowerCase() || '.mp3';
+    const title = req.body.title || path.parse(req.file.originalname).name;
+    const filename = `${title}${ext}`;
+    const format = detectFormat(filename);
+    const r2Key = `${group.user_id}/guest-${trackId}-${filename}`;
+    const contentType = contentTypeFromExt(ext);
+
+    const fileBuffer = await fs.readFile(tmpPath);
+    await uploadToR2(r2Key, fileBuffer, contentType);
+
+    const record = {
+      id: trackId, user_id: group.user_id, title, filename, r2_key: r2Key,
+      size: req.file.size, format, sync_group: group.name, sync_group_id: group.id,
+      is_original: false, source: 'guest_upload',
+      daw: req.body.daw || null, bpm: req.body.bpm ? parseInt(req.body.bpm) : null,
+    };
+    const { error: dbErr } = await supabase.from('tracks').insert(record);
+    if (dbErr) return res.status(500).json({ error: `Database error: ${dbErr.message}` });
+
+    res.status(201).json({ id: trackId, title, filename, format, sync_group_id: group.id });
+  } catch (err) { console.error('Guest upload error:', err); res.status(500).json({ error: `Upload failed: ${err.message}` }); }
+  finally { if (tmpPath) await cleanup(tmpPath); }
 });
 
 app.get('/api/tracks/by-sync-group/:syncGroup', authMiddleware, async (req, res) => {
@@ -369,15 +430,32 @@ app.get('/api/tracks/:id/download', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to get download URL' }); }
 });
 
+app.get('/api/tracks/deleted', authMiddleware, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('tracks').select('*').eq('user_id', req.user.id).not('deleted_at', 'is', null).order('deleted_at', { ascending: false });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) { res.status(500).json({ error: 'Failed to fetch deleted tracks' }); }
+});
+
 app.delete('/api/tracks/:id', authMiddleware, async (req, res) => {
   try {
-    const { data, error } = await supabase.from('tracks').select('r2_key').eq('id', req.params.id).eq('user_id', req.user.id).limit(1);
+    const { data, error } = await supabase.from('tracks').select('id').eq('id', req.params.id).eq('user_id', req.user.id).limit(1);
     if (error) throw error;
     if (!data?.length) return res.status(404).json({ error: 'Track not found' });
-    await deleteFromR2(data[0].r2_key);
-    await supabase.from('tracks').delete().eq('id', req.params.id);
-    res.json({ message: 'Track deleted' });
+    await supabase.from('tracks').update({ deleted_at: new Date().toISOString() }).eq('id', req.params.id).eq('user_id', req.user.id);
+    res.json({ message: 'Track moved to trash' });
   } catch (err) { res.status(500).json({ error: 'Failed to delete track' }); }
+});
+
+app.patch('/api/tracks/:id/restore', authMiddleware, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('tracks').select('id').eq('id', req.params.id).eq('user_id', req.user.id).limit(1);
+    if (error) throw error;
+    if (!data?.length) return res.status(404).json({ error: 'Track not found' });
+    await supabase.from('tracks').update({ deleted_at: null }).eq('id', req.params.id).eq('user_id', req.user.id);
+    res.json({ message: 'Track restored' });
+  } catch (err) { res.status(500).json({ error: 'Failed to restore track' }); }
 });
 
 app.patch('/api/tracks/:id/move', authMiddleware, async (req, res) => {
@@ -617,6 +695,108 @@ app.delete('/api/projects/:id/permanent', authMiddleware, async (req, res) => {
     await supabase.from('tracks').delete().eq('id', req.params.id);
     res.json({ message: 'Permanently deleted' });
   } catch (err) { res.status(500).json({ error: 'Failed to permanently delete' }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PLAYLISTS
+// SQL migration: see apply_migration 'add_playlists_sync_groups'
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Public playlist — no auth, must be defined before /:id
+app.get('/api/playlists/public/:id', async (req, res) => {
+  try {
+    const { data: playlist, error } = await supabase.from('playlists').select('id, name, description, created_at').eq('id', req.params.id).eq('is_public', true).single();
+    if (error || !playlist) return res.status(404).json({ error: 'Playlist not found or not public' });
+    const { data: pt } = await supabase.from('playlist_tracks').select('position, added_at, track_id').eq('playlist_id', req.params.id).order('position', { ascending: true });
+    const trackIds = (pt || []).map(r => r.track_id);
+    let tracks = [];
+    if (trackIds.length > 0) {
+      const { data: td } = await supabase.from('tracks').select('id, title, filename, format, size, duration, daw, bpm').in('id', trackIds).is('deleted_at', null);
+      const trackMap = Object.fromEntries((td || []).map(t => [t.id, t]));
+      tracks = (pt || []).map(r => ({ ...trackMap[r.track_id], position: r.position, added_at: r.added_at })).filter(t => t.id);
+    }
+    res.json({ ...playlist, tracks });
+  } catch (err) { res.status(500).json({ error: 'Failed to fetch public playlist' }); }
+});
+
+app.post('/api/playlists', authMiddleware, async (req, res) => {
+  try {
+    const { name, description, is_public } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: 'Name required' });
+    const { data, error } = await supabase.from('playlists').insert({ user_id: req.user.id, name: name.trim(), description: description || null, is_public: !!is_public }).select().single();
+    if (error) return res.status(500).json({ error: `Database error: ${error.message}` });
+    res.status(201).json(data);
+  } catch (err) { res.status(500).json({ error: 'Failed to create playlist' }); }
+});
+
+app.get('/api/playlists', authMiddleware, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('playlists').select('*').eq('user_id', req.user.id).order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) { res.status(500).json({ error: 'Failed to fetch playlists' }); }
+});
+
+app.get('/api/playlists/:id', authMiddleware, async (req, res) => {
+  try {
+    const { data: playlist, error } = await supabase.from('playlists').select('*').eq('id', req.params.id).eq('user_id', req.user.id).single();
+    if (error || !playlist) return res.status(404).json({ error: 'Playlist not found' });
+    const { data: pt } = await supabase.from('playlist_tracks').select('position, added_at, track_id').eq('playlist_id', req.params.id).order('position', { ascending: true });
+    const trackIds = (pt || []).map(r => r.track_id);
+    let tracks = [];
+    if (trackIds.length > 0) {
+      const { data: td } = await supabase.from('tracks').select('id, title, filename, format, size, duration, daw, bpm, sync_group').in('id', trackIds).is('deleted_at', null);
+      const trackMap = Object.fromEntries((td || []).map(t => [t.id, t]));
+      tracks = (pt || []).map(r => ({ ...trackMap[r.track_id], position: r.position, added_at: r.added_at })).filter(t => t.id);
+    }
+    res.json({ ...playlist, tracks });
+  } catch (err) { res.status(500).json({ error: 'Failed to fetch playlist' }); }
+});
+
+app.patch('/api/playlists/:id', authMiddleware, async (req, res) => {
+  try {
+    const { name, description, is_public } = req.body;
+    const updates = {};
+    if (name !== undefined) updates.name = name.trim();
+    if (description !== undefined) updates.description = description;
+    if (is_public !== undefined) updates.is_public = !!is_public;
+    if (!Object.keys(updates).length) return res.status(400).json({ error: 'Nothing to update' });
+    const { data, error } = await supabase.from('playlists').update(updates).eq('id', req.params.id).eq('user_id', req.user.id).select().single();
+    if (error) return res.status(500).json({ error: `Database error: ${error.message}` });
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: 'Failed to update playlist' }); }
+});
+
+app.delete('/api/playlists/:id', authMiddleware, async (req, res) => {
+  try {
+    const { error } = await supabase.from('playlists').delete().eq('id', req.params.id).eq('user_id', req.user.id);
+    if (error) throw error;
+    res.json({ message: 'Playlist deleted' });
+  } catch (err) { res.status(500).json({ error: 'Failed to delete playlist' }); }
+});
+
+app.post('/api/playlists/:id/tracks', authMiddleware, async (req, res) => {
+  try {
+    const { track_id, position } = req.body;
+    if (!track_id) return res.status(400).json({ error: 'track_id required' });
+    // Verify playlist belongs to user
+    const { data: playlist, error: pe } = await supabase.from('playlists').select('id').eq('id', req.params.id).eq('user_id', req.user.id).single();
+    if (pe || !playlist) return res.status(404).json({ error: 'Playlist not found' });
+    const { data, error } = await supabase.from('playlist_tracks').insert({ playlist_id: req.params.id, track_id, position: position ?? null }).select().single();
+    if (error) return res.status(500).json({ error: `Database error: ${error.message}` });
+    res.status(201).json(data);
+  } catch (err) { res.status(500).json({ error: 'Failed to add track to playlist' }); }
+});
+
+app.delete('/api/playlists/:id/tracks/:trackId', authMiddleware, async (req, res) => {
+  try {
+    // Verify playlist belongs to user
+    const { data: playlist, error: pe } = await supabase.from('playlists').select('id').eq('id', req.params.id).eq('user_id', req.user.id).single();
+    if (pe || !playlist) return res.status(404).json({ error: 'Playlist not found' });
+    const { error } = await supabase.from('playlist_tracks').delete().eq('playlist_id', req.params.id).eq('track_id', req.params.trackId);
+    if (error) throw error;
+    res.json({ message: 'Track removed from playlist' });
+  } catch (err) { res.status(500).json({ error: 'Failed to remove track from playlist' }); }
 });
 
 // ── Error handler ───────────────────────────────────────────────────────────
