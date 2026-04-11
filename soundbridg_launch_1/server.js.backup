@@ -50,7 +50,7 @@ app.use(cors({
   origin(origin, cb) {
     if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
     console.warn(`CORS: "${origin}" not in list, allowing`);
-    return cb(new Error(`Origin not allowed`));
+    return cb(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -262,7 +262,7 @@ app.post('/api/tracks/upload', authMiddleware, upload.single('file'), async (req
     const record = {
       id: trackId, user_id: req.user.id, title, filename, r2_key: r2Key, size: req.file.size,
       duration: req.body.duration ? parseFloat(req.body.duration) : null,
-      daw: req.body.daw || null, bpm: req.body.bpm ? parseInt(req.body.bpm) : null,
+      daw: req.body.daw || 'FL Studio', bpm: req.body.bpm ? parseInt(req.body.bpm) : null,
       tags: req.body.tags || null, source: req.body.source || 'web', shareable_token: null,
       sync_group: syncGroup, is_original: isOriginal, converted_from: convertedFrom,
       folder_id: folderId, format,
@@ -692,7 +692,7 @@ app.delete('/api/projects/:id/permanent', authMiddleware, async (req, res) => {
     if (error) throw error;
     if (!data?.length) return res.status(404).json({ error: 'Project not found' });
     await deleteFromR2(data[0].r2_key);
-    await supabase.from('tracks').delete().eq('id', req.params.id).eq('user_id', req.user.id);
+    await supabase.from('tracks').delete().eq('id', req.params.id);
     res.json({ message: 'Permanently deleted' });
   } catch (err) { res.status(500).json({ error: 'Failed to permanently delete' }); }
 });
