@@ -1,4 +1,5 @@
-const DMG_URL = 'https://pub-83f852d659c145459103180a6d018dc2.r2.dev/SoundBridg-2.0.0-arm64.dmg'
+const DMG_URL = 'https://pub-83f852d659c145459103180a6d018dc2.r2.dev/SoundBridg-latest-universal.dmg'
+const DMG_URL_LEGACY = 'https://pub-83f852d659c145459103180a6d018dc2.r2.dev/SoundBridg-latest-universal.dmg'
 
 export default function Home({ setPage }) {
   return (
@@ -59,7 +60,13 @@ export default function Home({ setPage }) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               Download for Mac
-              <span className="text-xs font-normal opacity-60">Apple Silicon</span>
+              <span className="text-xs font-normal opacity-60">macOS 13+</span>
+            </a>
+            <a href={DMG_URL_LEGACY} download
+              className="flex items-center gap-2.5 px-6 py-3.5 rounded-xl font-medium transition-all hover:text-white"
+              style={{ color: 'var(--text-secondary)', border: '1px solid var(--border-mid)' }}>
+              Download for Mac
+              <span className="text-xs font-normal opacity-60">macOS 12 Monterey</span>
             </a>
 
             {/* Sign In */}
