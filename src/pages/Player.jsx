@@ -15,8 +15,10 @@ export default function Player() {
   })
   const [loadingTrack, setLoadingTrack] = useState(false)
   const audioRef = useRef(null)
-  const progressBarRef = useRef(null)
+  const progressRef = useRef(null)
+  const volumeBarRef = useRef(null)
   const isDragging = useRef(false)
+  const isVolumeDragging = useRef(false)
 
   useEffect(() => {
     const fetchTracks = async () => {
@@ -105,54 +107,52 @@ export default function Player() {
     else { audio.play().catch(() => {}); setPlaying(true) }
   }
 
-  // Progress bar: mousedown starts a scrub session
-  const handleProgressMouseDown = (e) => {
+  // ── Progress bar drag ──────────────────────────────────────────────────────
+  const scrubTo = (clientX) => {
+    const rect = progressRef.current.getBoundingClientRect()
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
     const audio = audioRef.current
-    if (!audio || !duration) return
-
-    isDragging.current = true
-
-    const scrubTo = (clientX) => {
-      const rect = progressBarRef.current.getBoundingClientRect()
-      const scrubPos = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
-      setProgress(scrubPos * duration)
-      audio.currentTime = scrubPos * duration
-    }
-
-    scrubTo(e.clientX)
-
-    const onMouseMove = (moveEvt) => scrubTo(moveEvt.clientX)
-    const onMouseUp = () => {
-      isDragging.current = false
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
-    }
-
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
+    const dur = audio.duration && isFinite(audio.duration) ? audio.duration : 0
+    if (!dur) return
+    audio.currentTime = ratio * dur
+    setProgress(audio.currentTime)
   }
 
-  // Volume slider: mousedown starts a drag session
-  const handleVolumeMouseDown = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect()
+  const onProgressMouseMove = (e) => { if (isDragging.current) scrubTo(e.clientX) }
+  const onProgressMouseUp = () => {
+    isDragging.current = false
+    document.removeEventListener('mousemove', onProgressMouseMove)
+    document.removeEventListener('mouseup', onProgressMouseUp)
+  }
 
-    const updateVolume = (clientX) => {
-      const val = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
-      setVolume(val)
-      if (audioRef.current) audioRef.current.volume = val
-      localStorage.setItem('sb_volume', val)
-    }
+  const onProgressMouseDown = (e) => {
+    isDragging.current = true
+    scrubTo(e.clientX)
+    document.addEventListener('mousemove', onProgressMouseMove)
+    document.addEventListener('mouseup', onProgressMouseUp)
+  }
 
-    updateVolume(e.clientX)
+  // ── Volume slider drag ──────────────────────────────────────────────────────
+  const applyVolume = (clientX) => {
+    const rect = volumeBarRef.current.getBoundingClientRect()
+    const val = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+    setVolume(val)
+    if (audioRef.current) audioRef.current.volume = val
+    localStorage.setItem('sb_volume', val)
+  }
 
-    const onMouseMove = (moveEvt) => updateVolume(moveEvt.clientX)
-    const onMouseUp = () => {
-      window.removeEventListener('mousemove', onMouseMove)
-      window.removeEventListener('mouseup', onMouseUp)
-    }
+  const onVolumeMouseMove = (e) => { if (isVolumeDragging.current) applyVolume(e.clientX) }
+  const onVolumeMouseUp = () => {
+    isVolumeDragging.current = false
+    document.removeEventListener('mousemove', onVolumeMouseMove)
+    document.removeEventListener('mouseup', onVolumeMouseUp)
+  }
 
-    window.addEventListener('mousemove', onMouseMove)
-    window.addEventListener('mouseup', onMouseUp)
+  const onVolumeMouseDown = (e) => {
+    isVolumeDragging.current = true
+    applyVolume(e.clientX)
+    document.addEventListener('mousemove', onVolumeMouseMove)
+    document.addEventListener('mouseup', onVolumeMouseUp)
   }
 
   const fmtTime = (s) => {
@@ -189,10 +189,10 @@ export default function Player() {
           {/* Progress bar */}
           <div className="mb-3">
             <div
-              ref={progressBarRef}
+              ref={progressRef}
               className="w-full h-1.5 rounded-full cursor-pointer overflow-hidden"
               style={{background:'rgba(27,58,92,0.5)'}}
-              onMouseDown={handleProgressMouseDown}
+              onMouseDown={onProgressMouseDown}
             >
               <div
                 className="h-full rounded-full transition-all"
@@ -224,9 +224,10 @@ export default function Player() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-9.536a5 5 0 000 7.072"/>
             </svg>
             <div
+              ref={volumeBarRef}
               className="flex-1 h-1 rounded-full cursor-pointer"
               style={{background:`linear-gradient(to right, #c9a84c ${volume*100}%, rgba(27,58,92,0.5) ${volume*100}%)`}}
-              onMouseDown={handleVolumeMouseDown}
+              onMouseDown={onVolumeMouseDown}
             />
           </div>
         </div>
