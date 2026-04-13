@@ -9,9 +9,14 @@ export default function Player() {
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState(0)
-  const [volume, setVolume] = useState(0.8)
+  const [volume, setVolume] = useState(() => {
+    const saved = localStorage.getItem('sb_volume')
+    return saved !== null ? parseFloat(saved) : 0.8
+  })
   const [loadingTrack, setLoadingTrack] = useState(false)
   const audioRef = useRef(null)
+  const progressBarRef = useRef(null)
+  const isDragging = useRef(false)
 
   useEffect(() => {
     const fetchTracks = async () => {
@@ -33,10 +38,19 @@ export default function Player() {
     fetchTracks()
   }, [])
 
+  // Apply persisted volume to audio element on mount
+  useEffect(() => {
+    const audio = audioRef.current
+    if (audio) audio.volume = volume
+  }, [])
+
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
-    const onTime = () => setProgress(audio.currentTime)
+    const onTime = () => {
+      if (isDragging.current) return
+      setProgress(audio.currentTime)
+    }
     const onDuration = () => setDuration(audio.duration)
     const onEnd = () => { setPlaying(false); setProgress(0) }
     audio.addEventListener('timeupdate', onTime)
@@ -91,12 +105,54 @@ export default function Player() {
     else { audio.play().catch(() => {}); setPlaying(true) }
   }
 
-  const seek = (e) => {
+  // Progress bar: mousedown starts a scrub session
+  const handleProgressMouseDown = (e) => {
     const audio = audioRef.current
     if (!audio || !duration) return
+
+    isDragging.current = true
+
+    const scrubTo = (clientX) => {
+      const rect = progressBarRef.current.getBoundingClientRect()
+      const scrubPos = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+      setProgress(scrubPos * duration)
+      audio.currentTime = scrubPos * duration
+    }
+
+    scrubTo(e.clientX)
+
+    const onMouseMove = (moveEvt) => scrubTo(moveEvt.clientX)
+    const onMouseUp = () => {
+      isDragging.current = false
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }
+
+  // Volume slider: mousedown starts a drag session
+  const handleVolumeMouseDown = (e) => {
     const rect = e.currentTarget.getBoundingClientRect()
-    const ratio = (e.clientX - rect.left) / rect.width
-    audio.currentTime = ratio * duration
+
+    const updateVolume = (clientX) => {
+      const val = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+      setVolume(val)
+      if (audioRef.current) audioRef.current.volume = val
+      localStorage.setItem('sb_volume', val)
+    }
+
+    updateVolume(e.clientX)
+
+    const onMouseMove = (moveEvt) => updateVolume(moveEvt.clientX)
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
   }
 
   const fmtTime = (s) => {
@@ -133,13 +189,14 @@ export default function Player() {
           {/* Progress bar */}
           <div className="mb-3">
             <div
+              ref={progressBarRef}
               className="w-full h-1.5 rounded-full cursor-pointer overflow-hidden"
               style={{background:'rgba(27,58,92,0.5)'}}
-              onClick={seek}
+              onMouseDown={handleProgressMouseDown}
             >
               <div
                 className="h-full rounded-full transition-all"
-                style={{width: duration ? `${(progress/duration)*100}%` : '0%', background:'linear-gradient(90deg,#c9a84c,#fde047)'}}
+                style={{width: `${(progress / duration) * 100 || 0}%`, background:'linear-gradient(90deg,#c9a84c,#fde047)'}}
               />
             </div>
             <div className="flex justify-between text-xs text-white/40 mt-1">
@@ -166,11 +223,10 @@ export default function Player() {
             <svg className="w-4 h-4 text-white/40 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-9.536a5 5 0 000 7.072"/>
             </svg>
-            <input
-              type="range" min="0" max="1" step="0.05" value={volume}
-              onChange={e => { const v = parseFloat(e.target.value); setVolume(v); if (audioRef.current) audioRef.current.volume = v }}
-              className="flex-1 h-1 rounded-full accent-brand-gold"
+            <div
+              className="flex-1 h-1 rounded-full cursor-pointer"
               style={{background:`linear-gradient(to right, #c9a84c ${volume*100}%, rgba(27,58,92,0.5) ${volume*100}%)`}}
+              onMouseDown={handleVolumeMouseDown}
             />
           </div>
         </div>
