@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../context/AuthContext'
+import Waveform from '../components/Waveform'
 
 const STORAGE_LIMIT = 10 * 1024 * 1024 * 1024 // 10 GB
 
@@ -26,18 +27,65 @@ export default function Dashboard({ setPage }) {
   const [uploadingTrack, setUploadingTrack] = useState(false)
   const [currentTrack, setCurrentTrack] = useState(null)
   const [audioPlaying, setAudioPlaying] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [volume, setVolume] = useState(() => {
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('sb_volume') : null
+    return saved !== null ? parseFloat(saved) : 0.8
+  })
+  const [showFullPlayer, setShowFullPlayer] = useState(false)
+  const [currentStreamUrl, setCurrentStreamUrl] = useState('')
+  const [search, setSearch] = useState('')
+  const [publicShareUrl, setPublicShareUrl] = useState('')
+  const [shareLoading, setShareLoading] = useState(false)
+  const [shareRecipient, setShareRecipient] = useState('')
+  const [shareSendStatus, setShareSendStatus] = useState('')
   const editRef = useRef()
   const uploadRef = useRef()
   const audioRef = useRef(null)
+  const miniProgressRef = useRef(null)
+  const miniVolumeRef = useRef(null)
+  const fullProgressRef = useRef(null)
+  const fullVolumeRef = useRef(null)
+  const isDraggingProgress = useRef(false)
+  const isDraggingVolume = useRef(false)
 
   // Create the audio element once on mount
   useEffect(() => {
     const audio = new Audio()
     audioRef.current = audio
-    audio.addEventListener('ended', () => setAudioPlaying(false))
-    audio.addEventListener('pause', () => setAudioPlaying(false))
-    audio.addEventListener('play', () => setAudioPlaying(true))
+    audio.volume = volume
+    audio.preload = 'auto'
+
+    const onEnded = () => { setAudioPlaying(false); setProgress(0) }
+    const onPause = () => setAudioPlaying(false)
+    const onPlay = () => setAudioPlaying(true)
+    const grabDuration = () => {
+      const d = audio.duration
+      if (d && isFinite(d) && d > 0) setDuration(d)
+    }
+    const onTime = () => {
+      if (isDraggingProgress.current) return
+      setProgress(audio.currentTime)
+      grabDuration()
+    }
+
+    audio.addEventListener('ended', onEnded)
+    audio.addEventListener('pause', onPause)
+    audio.addEventListener('play', onPlay)
+    audio.addEventListener('timeupdate', onTime)
+    audio.addEventListener('loadedmetadata', grabDuration)
+    audio.addEventListener('durationchange', grabDuration)
+    audio.addEventListener('canplay', grabDuration)
+
     return () => {
+      audio.removeEventListener('ended', onEnded)
+      audio.removeEventListener('pause', onPause)
+      audio.removeEventListener('play', onPlay)
+      audio.removeEventListener('timeupdate', onTime)
+      audio.removeEventListener('loadedmetadata', grabDuration)
+      audio.removeEventListener('durationchange', grabDuration)
+      audio.removeEventListener('canplay', grabDuration)
       audio.pause()
       audio.src = ''
     }
@@ -57,6 +105,8 @@ export default function Dashboard({ setPage }) {
     audio.pause()
     setCurrentTrack(track)
     setAudioPlaying(false)
+    setProgress(0)
+    setDuration(0)
     try {
       const res = await fetch(`${BACKEND_URL}/api/tracks/${track.id}/stream`, {
         headers: { Authorization: `Bearer ${getToken()}` }
@@ -64,8 +114,14 @@ export default function Dashboard({ setPage }) {
       const data = await res.json()
       if (!res.ok || !data.stream_url) throw new Error('No stream URL')
       audio.src = data.stream_url
+      setCurrentStreamUrl(data.stream_url)
+      audio.volume = volume
       audio.load()
-      audio.play().then(() => setAudioPlaying(true)).catch(() => {})
+      audio.play().then(() => {
+        setAudioPlaying(true)
+        const d = audio.duration
+        if (d && isFinite(d) && d > 0) setDuration(d)
+      }).catch(() => {})
     } catch { setCurrentTrack(null) }
   }
 
@@ -74,6 +130,117 @@ export default function Dashboard({ setPage }) {
     if (!audio || !currentTrack) return
     if (audioPlaying) { audio.pause() } else { audio.play().catch(() => {}) }
   }
+
+  const playAdjacent = (delta) => {
+    if (!currentTrack) return
+    const playable = projects.filter(p => p.format !== 'flp')
+    const idx = playable.findIndex(p => p.id === currentTrack.id)
+    if (idx === -1) return
+    const next = playable[(idx + delta + playable.length) % playable.length]
+    if (next) selectTrack(next)
+  }
+
+  const fmtTime = (s) => {
+    if (!s || !isFinite(s) || isNaN(s)) return '0:00'
+    const m = Math.floor(s / 60)
+    const sec = Math.floor(s % 60)
+    return `${m}:${sec.toString().padStart(2, '0')}`
+  }
+
+  // ── Scrub (click + drag) — native listeners to bypass React delegation at #root ──
+  const scrubTo = (clientX, bar) => {
+    const audio = audioRef.current
+    if (!bar || !audio) return
+    const rect = bar.getBoundingClientRect()
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+    const dur = audio.duration
+    if (!dur || !isFinite(dur) || dur <= 0) return
+    audio.currentTime = ratio * dur
+    setProgress(audio.currentTime)
+  }
+
+  useEffect(() => {
+    const bars = [miniProgressRef.current, fullProgressRef.current].filter(Boolean)
+    if (bars.length === 0) return
+
+    let activeBar = null
+    const onMove = (e) => { if (isDraggingProgress.current && activeBar) scrubTo(e.clientX, activeBar) }
+    const onUp = () => {
+      if (isDraggingProgress.current) {
+        isDraggingProgress.current = false
+        activeBar = null
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+      }
+    }
+    const makeDown = (bar) => (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      isDraggingProgress.current = true
+      activeBar = bar
+      scrubTo(e.clientX, bar)
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+    }
+    const downHandlers = bars.map(bar => {
+      const h = makeDown(bar)
+      bar.addEventListener('mousedown', h)
+      return [bar, h]
+    })
+    return () => {
+      downHandlers.forEach(([bar, h]) => bar.removeEventListener('mousedown', h))
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+  }, [currentTrack, showFullPlayer])
+
+  // ── Volume (click + drag) ──
+  const applyVolume = (clientX, bar) => {
+    if (!bar) return
+    const rect = bar.getBoundingClientRect()
+    const val = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+    setVolume(val)
+    if (audioRef.current) audioRef.current.volume = val
+    try { localStorage.setItem('sb_volume', String(val)) } catch {}
+  }
+
+  useEffect(() => {
+    const bars = [miniVolumeRef.current, fullVolumeRef.current].filter(Boolean)
+    if (bars.length === 0) return
+
+    let activeBar = null
+    const onMove = (e) => { if (isDraggingVolume.current && activeBar) applyVolume(e.clientX, activeBar) }
+    const onUp = () => {
+      if (isDraggingVolume.current) {
+        isDraggingVolume.current = false
+        activeBar = null
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+      }
+    }
+    const makeDown = (bar) => (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      isDraggingVolume.current = true
+      activeBar = bar
+      applyVolume(e.clientX, bar)
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+    }
+    const downHandlers = bars.map(bar => {
+      const h = makeDown(bar)
+      bar.addEventListener('mousedown', h)
+      return [bar, h]
+    })
+    return () => {
+      downHandlers.forEach(([bar, h]) => bar.removeEventListener('mousedown', h))
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+  }, [currentTrack, showFullPlayer])
+
+  const progressPct = (duration > 0 && isFinite(duration)) ? Math.min(100, (progress / duration) * 100) : 0
+  const volumePct = Math.round(volume * 100)
 
   const handleUpload = async (e) => {
     const file = e.target.files?.[0]
@@ -99,6 +266,50 @@ export default function Dashboard({ setPage }) {
   }
 
   useEffect(() => { fetchProjects(); fetchRecentlyDeleted() }, [])
+
+  // Mint a public share URL when the share modal opens. The backend persists
+  // a `shareable_token` on the track row and returns a frontend-relative URL
+  // (e.g. https://soundbridg.com/shared/abcd123) that anyone can open.
+  useEffect(() => {
+    if (!shareProject) {
+      setPublicShareUrl('')
+      setShareRecipient('')
+      setShareSendStatus('')
+      return
+    }
+    let cancelled = false
+    setShareLoading(true)
+    setPublicShareUrl('')
+    ;(async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/tracks/${shareProject.id}/share`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${getToken()}` },
+        })
+        const data = await res.json()
+        if (cancelled) return
+        if (!res.ok) throw new Error(data.error || 'Share failed')
+        // Backend builds share_url from its own FRONTEND_URL env; if it came
+        // back pointing at localhost or anything else, rewrite to the current
+        // origin so links are always clickable for our users.
+        let url = data.share_url || ''
+        try {
+          const u = new URL(url)
+          if (u.origin !== window.location.origin) {
+            url = `${window.location.origin}/shared/${data.token}`
+          }
+        } catch {
+          url = `${window.location.origin}/shared/${data.token}`
+        }
+        setPublicShareUrl(url)
+      } catch (err) {
+        console.warn('[share] failed:', err)
+      } finally {
+        if (!cancelled) setShareLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [shareProject])
   useEffect(() => {
     if (editingId && editRef.current) editRef.current.focus()
   }, [editingId])
@@ -166,6 +377,15 @@ export default function Dashboard({ setPage }) {
   }
 
   const handleSort = (key) => {
+    // Format column: clicking cycles the active filter instead of a noisy
+    // alphabetical sort — ALL → MP3 → WAV → FLP → ALL.
+    if (key === 'kind') {
+      const cycle = ['all', 'mp3', 'wav', 'flp']
+      const next = cycle[(cycle.indexOf(filterKind) + 1) % cycle.length]
+      setFilterKind(next)
+      setSortKey('kind')
+      return
+    }
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('asc') }
   }
@@ -213,8 +433,14 @@ export default function Dashboard({ setPage }) {
   const isRecentlyDeleted = activeFolder === 'Recently Deleted'
   const sourceList = isRecentlyDeleted ? recentlyDeleted : projects
 
+  const q = search.trim().toLowerCase()
   const filtered = sourceList
     .filter(p => filterKind === 'all' || getExt(p) === filterKind)
+    .filter(p => {
+      if (!q) return true
+      const hay = `${p.title || ''} ${p.filename || ''} ${p.format || ''} ${p.sync_group || ''}`.toLowerCase()
+      return hay.includes(q)
+    })
     .sort((a, b) => {
       let va, vb
       if (sortKey === 'name') { va = (a.title || a.filename || '').toLowerCase(); vb = (b.title || b.filename || '').toLowerCase() }
@@ -224,7 +450,11 @@ export default function Dashboard({ setPage }) {
       return sortDir === 'asc' ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1)
     })
 
-  const shareUrl = shareProject ? `${BACKEND_URL}/api/tracks/${shareProject.id}/stream` : ''
+  // Public share URL is minted lazily by the backend when the modal opens.
+  // We prefer the returned URL (which points at the FRONTEND /shared/:token
+  // route and is publicly accessible); we fall back to an empty string so
+  // we never leak the authed stream endpoint as a share link.
+  const shareUrl = publicShareUrl
 
   // Stats
   const recentProject = [...projects].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
@@ -235,16 +465,32 @@ export default function Dashboard({ setPage }) {
   const ringCircum = 188.5
   const ringOffset = ringCircum - (ringCircum * usedPct / 100)
 
-  // Color art gradients for demo cards
+  // Album-art gradients — rich, Spotify-ish palette
   const ART_GRADS = [
-    'linear-gradient(135deg,#0f2640 0%,#1B3A5C 100%)',
-    'linear-gradient(135deg,#1a1a35 0%,#2a1a4a 100%)',
-    'linear-gradient(135deg,#1a0f0f 0%,#3a1a1a 100%)',
-    'linear-gradient(135deg,#0f1a30 0%,#1B3A5C 80%)',
-    'linear-gradient(135deg,#0d1f18 0%,#1a3a28 100%)',
-    'linear-gradient(135deg,#1a150f 0%,#3a2a10 100%)',
+    'linear-gradient(135deg,#1e3a8a 0%,#6d28d9 100%)',
+    'linear-gradient(135deg,#0f766e 0%,#1e40af 100%)',
+    'linear-gradient(135deg,#be123c 0%,#7c2d12 100%)',
+    'linear-gradient(135deg,#0369a1 0%,#6d28d9 100%)',
+    'linear-gradient(135deg,#059669 0%,#0f766e 100%)',
+    'linear-gradient(135deg,#b45309 0%,#7c2d12 100%)',
+    'linear-gradient(135deg,#7c3aed 0%,#db2777 100%)',
+    'linear-gradient(135deg,#0891b2 0%,#1e3a8a 100%)',
+    'linear-gradient(135deg,#c2410c 0%,#881337 100%)',
+    'linear-gradient(135deg,#4338ca 0%,#0f172a 100%)',
   ]
   const EMOJIS = ['🎹', '🎸', '🥁', '🎺', '🎻', '🎙️']
+  // Stable art seed per track so the same track always picks the same gradient
+  const seedOf = (p) => {
+    const k = String(p?.id ?? p?.filename ?? p?.title ?? '')
+    let h = 0
+    for (let i = 0; i < k.length; i++) h = ((h << 5) - h) + k.charCodeAt(i) | 0
+    return Math.abs(h) % ART_GRADS.length
+  }
+  const gradFor = (p) => ART_GRADS[seedOf(p)]
+  const letterOf = (p) => {
+    const n = (p?.title || p?.filename || '').trim()
+    return (n ? n[0] : '♪').toUpperCase()
+  }
 
   const topProjects = projects.slice(0, 4)
 
@@ -393,16 +639,37 @@ export default function Dashboard({ setPage }) {
               </button>
             ))}
             {/* Search */}
-            <button style={{
-              width: 32, height: 32, borderRadius: '6px', border: '1px solid var(--border-mid)',
-              background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 0.12s',
-            }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" /></svg>
-            </button>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              height: 32, padding: '0 10px',
+              border: '1px solid var(--border-mid)', borderRadius: 6,
+              background: 'var(--bg-input)',
+              transition: 'border-color 0.12s',
+            }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style={{ color: 'var(--text-tertiary)', flexShrink: 0 }}>
+                <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+              </svg>
+              <input
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search tracks…"
+                style={{
+                  width: 140, border: 'none', background: 'transparent', outline: 'none',
+                  color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit',
+                }}
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch('')}
+                  title="Clear"
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 0, display: 'flex' }}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              )}
+            </div>
             {/* Refresh */}
             <button onClick={fetchProjects} style={{
               width: 32, height: 32, borderRadius: '6px', border: '1px solid var(--border-mid)',
@@ -458,7 +725,7 @@ export default function Dashboard({ setPage }) {
               {projects.filter(p => getExt(p) === 'flp').length === 0 ? (
                 <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '64px 0', color: 'var(--text-tertiary)', fontSize: '13px' }}>No FL Studio projects yet. Start syncing from the desktop app.</div>
               ) : projects.filter(p => getExt(p) === 'flp').map((p, i) => (
-                <ProjectCard2 key={p.id} name={p.title || p.filename || 'Untitled'} artGrad={ART_GRADS[i % ART_GRADS.length]} emoji={EMOJIS[i % EMOJIS.length]} meta={`${fmt(p.size)} · ${fmtAgo(p.created_at)}`} />
+                <ProjectCard2 key={p.id} name={p.title || p.filename || 'Untitled'} artGrad={gradFor(p)} letter={letterOf(p)} meta={`${fmt(p.size)} · ${fmtAgo(p.created_at)}`} />
               ))}
             </div>
           </div>
@@ -486,7 +753,7 @@ export default function Dashboard({ setPage }) {
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                       <td style={{ padding: '12px 20px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <div style={{ width: 32, height: 32, borderRadius: '6px', background: ART_GRADS[i % ART_GRADS.length], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>{EMOJIS[i % EMOJIS.length]}</div>
+                          <div style={{ width: 36, height: 36, borderRadius: '8px', background: gradFor(p), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', fontWeight: 700, color: 'rgba(255,255,255,0.95)', letterSpacing: '-0.02em', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12)' }}>{letterOf(p)}</div>
                           <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{p.title || p.filename || 'Untitled'}</span>
                         </div>
                       </td>
@@ -520,7 +787,11 @@ export default function Dashboard({ setPage }) {
               {isRecentlyDeleted ? 'Trash' : 'Recently synced'}
             </span>
             {!isRecentlyDeleted && (
-              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--accent)', cursor: 'pointer', opacity: 0.8, transition: 'opacity 0.12s' }}>
+              <span
+                onClick={() => setInnerView('tracks')}
+                onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '0.8'}
+                style={{ fontSize: '12px', fontWeight: 600, color: 'var(--accent)', cursor: 'pointer', opacity: 0.8, transition: 'opacity 0.12s' }}>
                 View all →
               </span>
             )}
@@ -614,16 +885,16 @@ export default function Dashboard({ setPage }) {
                   const ext = getExt(p)
                   const isEditing = editingId === p.id
                   const isWav = ext === 'wav'
-                  const artGrad = ART_GRADS[i % ART_GRADS.length]
-                  const emoji = EMOJIS[i % EMOJIS.length]
+                  const artGrad = gradFor(p)
+                  const letter = letterOf(p)
 
                   const isCurrentTrack = currentTrack?.id === p.id
                   return (
                     <tr key={p.id}
                       onContextMenu={e => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, type: 'file', project: p }) }}
                       onClick={() => selectTrack(p)}
-                      style={{ borderBottom: i < filtered.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer', transition: 'background 0.1s', background: isCurrentTrack ? 'var(--accent-dim)' : 'transparent' }}
-                      onMouseEnter={e => { if (!isCurrentTrack) e.currentTarget.style.background = 'var(--bg-hover)' }}
+                      style={{ borderBottom: i < filtered.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer', transition: 'background 0.2s ease', background: isCurrentTrack ? 'var(--accent-dim)' : 'transparent' }}
+                      onMouseEnter={e => { if (!isCurrentTrack) e.currentTarget.style.background = 'rgba(255,255,255,0.035)' }}
                       onMouseLeave={e => { if (!isCurrentTrack) e.currentTarget.style.background = 'transparent' }}>
 
                       {/* # / play indicator */}
@@ -636,11 +907,9 @@ export default function Dashboard({ setPage }) {
                       </td>
 
                       {/* Title */}
-                      <td style={{ padding: '12px 20px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          <div style={{ width: 36, height: 36, borderRadius: '6px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', border: '1px solid var(--border)', background: artGrad }}>
-                            {emoji}
-                          </div>
+                      <td style={{ padding: '14px 20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                          <TrackArt grad={artGrad} letter={letter} size={42} showPlay isActive={isCurrentTrack} isPlaying={isCurrentTrack && audioPlaying} />
                           <div>
                             {isEditing ? (
                               <input ref={editRef} value={editingName} onChange={e => setEditingName(e.target.value)}
@@ -735,16 +1004,20 @@ export default function Dashboard({ setPage }) {
             <>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '16px' }}>
                 <span style={{ fontSize: '16px', fontWeight: 700, letterSpacing: '-0.3px', color: 'var(--text-primary)' }}>Projects</span>
-                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--accent)', cursor: 'pointer', opacity: 0.8 }}>View all →</span>
+                <span
+                  onClick={() => setInnerView('projects')}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '0.8'}
+                  style={{ fontSize: '12px', fontWeight: 600, color: 'var(--accent)', cursor: 'pointer', opacity: 0.8, transition: 'opacity 0.12s' }}>
+                  View all →
+                </span>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '16px', marginBottom: '32px' }}>
-                {topProjects.map((p, i) => {
+                {topProjects.map((p) => {
                   const name = p.title || p.filename || 'Untitled'
-                  const artGrad = ART_GRADS[i % ART_GRADS.length]
-                  const emoji = EMOJIS[i % EMOJIS.length]
                   return (
-                    <ProjectCard2 key={p.id} name={name} artGrad={artGrad} emoji={emoji} meta={`${fmt(p.size)} · ${fmtAgo(p.created_at)}`} />
+                    <ProjectCard2 key={p.id} name={name} artGrad={gradFor(p)} letter={letterOf(p)} meta={`${fmt(p.size)} · ${fmtAgo(p.created_at)}`} />
                   )
                 })}
               </div>
@@ -813,24 +1086,35 @@ export default function Dashboard({ setPage }) {
           )}
         </div>}
 
-        {/* ── PLAYER BAR ── */}
-        <div style={{
-          background: 'rgba(10,10,15,0.85)',
-          backdropFilter: 'blur(20px) saturate(1.4)',
-          WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
-          borderTop: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center',
-          padding: '0 24px', height: '72px', flexShrink: 0, gap: '16px',
-        }}>
+        {/* ── PLAYER BAR ── click anywhere (except interactive controls) opens full-screen */}
+        <div
+          onClick={() => { if (currentTrack) setShowFullPlayer(true) }}
+          style={{
+            background: 'rgba(10,10,15,0.85)',
+            backdropFilter: 'blur(20px) saturate(1.4)',
+            WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
+            borderTop: '1px solid var(--border)',
+            display: 'flex', alignItems: 'center',
+            padding: '0 24px', height: '76px', flexShrink: 0, gap: '16px',
+            cursor: currentTrack ? 'pointer' : 'default',
+            transition: 'background 0.2s ease',
+          }}
+          onMouseEnter={e => { if (currentTrack) e.currentTarget.style.background = 'rgba(16,18,28,0.9)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(10,10,15,0.85)' }}>
           {/* Track info */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '240px', flexShrink: 0 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '14px',
+            width: '240px', flexShrink: 0,
+          }}>
             <div style={{
-              width: 44, height: 44, borderRadius: '6px', flexShrink: 0,
+              width: 48, height: 48, borderRadius: '10px', flexShrink: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '20px', border: '1px solid var(--border)',
-              background: currentTrack ? ART_GRADS[projects.indexOf(currentTrack) % ART_GRADS.length] : ART_GRADS[0],
+              fontSize: '18px', fontWeight: 700, letterSpacing: '-0.02em',
+              color: 'rgba(255,255,255,0.95)',
+              background: currentTrack ? gradFor(currentTrack) : ART_GRADS[0],
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12), 0 4px 16px rgba(0,0,0,0.4)',
             }}>
-              {currentTrack ? EMOJIS[projects.indexOf(currentTrack) % EMOJIS.length] : '🎵'}
+              {currentTrack ? letterOf(currentTrack) : '♪'}
             </div>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: '13px', fontWeight: 600, color: currentTrack ? 'var(--accent)' : 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -844,9 +1128,9 @@ export default function Dashboard({ setPage }) {
 
           {/* Controls */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <PlayerCtrlBtn><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" /></svg></PlayerCtrlBtn>
-              <button onClick={togglePlayPause} disabled={!currentTrack} style={{
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }} onClick={e => e.stopPropagation()}>
+              <PlayerCtrlBtn onClick={() => playAdjacent(-1)}><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" /></svg></PlayerCtrlBtn>
+              <button onClick={(e) => { e.stopPropagation(); togglePlayPause() }} disabled={!currentTrack} style={{
                 width: 34, height: 34, borderRadius: '50%',
                 background: currentTrack ? 'var(--text-primary)' : 'var(--border-mid)',
                 border: 'none', cursor: currentTrack ? 'pointer' : 'default',
@@ -860,30 +1144,175 @@ export default function Dashboard({ setPage }) {
                   : <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
                 }
               </button>
-              <PlayerCtrlBtn><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg></PlayerCtrlBtn>
+              <PlayerCtrlBtn onClick={() => playAdjacent(1)}><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg></PlayerCtrlBtn>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '100%', maxWidth: '480px' }}>
-              <span style={{ fontSize: '11px', fontFamily: 'JetBrains Mono,monospace', color: 'var(--text-tertiary)', minWidth: '32px' }}>0:00</span>
-              <div style={{ flex: 1, height: 3, background: 'var(--border-mid)', borderRadius: '2px' }}>
-                <div style={{ height: '100%', width: audioPlaying ? '30%' : '0%', background: 'var(--accent)', borderRadius: '2px', transition: 'width 0.3s' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '100%', maxWidth: '520px' }} onClick={e => e.stopPropagation()}>
+              <span style={{ fontSize: '11px', fontFamily: 'JetBrains Mono,monospace', color: 'var(--text-tertiary)', minWidth: '36px' }}>{fmtTime(progress)}</span>
+              <div
+                ref={miniProgressRef}
+                className="group"
+                style={{ flex: 1, height: 8, background: 'rgba(255,255,255,0.12)', borderRadius: '999px', cursor: 'pointer', userSelect: 'none', transition: 'height 0.15s ease' }}
+              >
+                <div style={{
+                  height: '100%', width: `${progressPct}%`,
+                  background: 'linear-gradient(90deg,#c9a84c,#fde047)',
+                  borderRadius: '999px', pointerEvents: 'none',
+                  boxShadow: progressPct > 0 ? '0 0 8px rgba(201,168,76,0.35)' : 'none',
+                }} />
               </div>
-              <span style={{ fontSize: '11px', fontFamily: 'JetBrains Mono,monospace', color: 'var(--text-tertiary)', minWidth: '32px', textAlign: 'right' }}>0:00</span>
+              <span style={{ fontSize: '11px', fontFamily: 'JetBrains Mono,monospace', color: 'var(--text-tertiary)', minWidth: '36px', textAlign: 'right' }}>{fmtTime(duration)}</span>
             </div>
           </div>
 
           {/* Volume */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '200px', justifyContent: 'flex-end', flexShrink: 0 }}>
-            <PlayerCtrlBtn>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5zm7-.17v6.34L9.83 13H7v-2h2.83L12 8.83z" /></svg>
-            </PlayerCtrlBtn>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '80px', height: '3px', background: 'var(--border-mid)', borderRadius: '2px', cursor: 'pointer' }}>
-                <div style={{ height: '100%', width: '72%', background: 'var(--text-secondary)', borderRadius: '2px' }} />
-              </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '200px', justifyContent: 'flex-end', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style={{ color: 'var(--text-tertiary)', flexShrink: 0 }}>
+              <path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z" />
+            </svg>
+            <div
+              ref={miniVolumeRef}
+              style={{ width: '110px', height: 6, background: 'rgba(255,255,255,0.12)', borderRadius: '999px', cursor: 'pointer', userSelect: 'none' }}
+            >
+              <div style={{ height: '100%', width: `${volumePct}%`, background: 'rgba(255,255,255,0.75)', borderRadius: '999px', pointerEvents: 'none' }} />
             </div>
           </div>
         </div>
       </div>
+
+      {/* ── FULL-SCREEN NOW PLAYING ── */}
+      {showFullPlayer && currentTrack && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 80,
+          bottom: '76px', // leave mini-player visible
+          background: `radial-gradient(circle at 20% 20%, ${gradFor(currentTrack).replace('linear-gradient(135deg,', '').split(' 0%')[0]}33 0%, transparent 55%), linear-gradient(180deg, rgba(10,12,22,0.97) 0%, rgba(6,8,16,0.98) 100%)`,
+          backdropFilter: 'blur(28px) saturate(1.4)',
+          WebkitBackdropFilter: 'blur(28px) saturate(1.4)',
+          display: 'flex', flexDirection: 'column',
+          padding: '28px 48px',
+          animation: 'sbPlayerIn 0.28s cubic-bezier(0.22, 1, 0.36, 1)',
+        }}>
+          {/* Top bar: close */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '28px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>
+              Now Playing
+            </div>
+            <button
+              onClick={() => setShowFullPlayer(false)}
+              title="Minimize"
+              style={{
+                width: 36, height: 36, borderRadius: '50%',
+                background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)',
+                color: 'var(--text-secondary)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.color = 'var(--text-secondary)' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M19 9l-7 7-7-7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Main row: art + info */}
+          <div style={{
+            flex: 1, display: 'flex', gap: '48px', alignItems: 'center',
+            maxWidth: '1200px', margin: '0 auto', width: '100%',
+          }}>
+            {/* Big album art */}
+            <div style={{
+              width: 'min(44vh, 420px)', height: 'min(44vh, 420px)', aspectRatio: '1/1',
+              borderRadius: '24px', flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 'min(18vh, 180px)', fontWeight: 800, letterSpacing: '-0.04em',
+              color: 'rgba(255,255,255,0.95)',
+              background: gradFor(currentTrack),
+              boxShadow: '0 32px 96px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06), inset 0 1px 0 rgba(255,255,255,0.15)',
+              textShadow: '0 4px 32px rgba(0,0,0,0.3)',
+            }}>
+              {letterOf(currentTrack)}
+            </div>
+
+            {/* Center info column */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '24px', minWidth: 0 }}>
+              <div>
+                <div style={{
+                  fontSize: '38px', fontWeight: 700, letterSpacing: '-0.5px',
+                  color: 'var(--text-primary)', lineHeight: 1.15,
+                  overflow: 'hidden', textOverflow: 'ellipsis',
+                  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                }}>
+                  {currentTrack.title || currentTrack.filename || 'Untitled'}
+                </div>
+                <div style={{ fontSize: '15px', color: 'var(--text-secondary)', marginTop: '8px' }}>
+                  {user?.name || user?.email || 'SoundBridg'} · {currentTrack.format?.toUpperCase() || '—'}
+                </div>
+              </div>
+
+              {/* SoundCloud-style real-time waveform */}
+              <div className="w-full">
+                <Waveform
+                  audio={audioRef.current}
+                  src={currentStreamUrl}
+                  height={96}
+                  barCount={260}
+                  onSeek={(t) => setProgress(t)}
+                />
+              </div>
+
+              {/* Time labels sit directly under the waveform; the waveform
+                  itself is the seek surface, so no duplicate progress bar. */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'JetBrains Mono,monospace', fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '-14px' }}>
+                <span>{fmtTime(progress)}</span>
+                <span>{fmtTime(duration)}</span>
+              </div>
+
+              {/* Controls + volume row */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '32px', marginTop: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                  <button onClick={() => playAdjacent(-1)} style={fullCtrlStyle()}>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" /></svg>
+                  </button>
+                  <button onClick={togglePlayPause} style={{
+                    width: 60, height: 60, borderRadius: '50%',
+                    background: 'var(--text-primary)', border: 'none', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'var(--bg)', transition: 'transform 0.1s, background 0.1s',
+                  }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent)'; e.currentTarget.style.transform = 'scale(1.05)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'var(--text-primary)'; e.currentTarget.style.transform = 'scale(1)' }}>
+                    {audioPlaying
+                      ? <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+                      : <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+                    }
+                  </button>
+                  <button onClick={() => playAdjacent(1)} style={fullCtrlStyle()}>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg>
+                  </button>
+                </div>
+
+                {/* Volume on right */}
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px', width: '220px' }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style={{ color: 'var(--text-secondary)', flexShrink: 0 }}>
+                    <path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z" />
+                  </svg>
+                  <div
+                    ref={fullVolumeRef}
+                    style={{
+                      flex: 1, height: 6, borderRadius: '3px',
+                      background: 'rgba(255,255,255,0.12)', cursor: 'pointer', userSelect: 'none',
+                    }}>
+                    <div style={{
+                      height: '100%', width: `${volumePct}%`,
+                      background: 'var(--accent)', borderRadius: '3px', pointerEvents: 'none',
+                    }} />
+                  </div>
+                  <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: '11px', color: 'var(--text-tertiary)', minWidth: '32px', textAlign: 'right' }}>{volumePct}%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Context menu ── */}
       {contextMenu && (
@@ -951,9 +1380,15 @@ export default function Dashboard({ setPage }) {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>Share link</p>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <input readOnly value={shareUrl} style={{ flex: 1, padding: '8px 12px', fontSize: '12px', borderRadius: '6px', background: 'var(--bg-input)', border: '1px solid var(--border-mid)', color: 'var(--text-secondary)', outline: 'none', fontFamily: 'JetBrains Mono,monospace' }} />
-                    <button onClick={() => navigator.clipboard.writeText(shareUrl)} style={{ padding: '8px 14px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, background: 'var(--accent)', color: '#0A0A0F', cursor: 'pointer', flexShrink: 0, border: 'none', fontFamily: 'inherit' }}>Copy</button>
+                    <input readOnly
+                      value={shareLoading ? 'Generating link…' : (shareUrl || 'Link unavailable')}
+                      style={{ flex: 1, padding: '8px 12px', fontSize: '12px', borderRadius: '6px', background: 'var(--bg-input)', border: '1px solid var(--border-mid)', color: 'var(--text-secondary)', outline: 'none', fontFamily: 'JetBrains Mono,monospace' }} />
+                    <button
+                      disabled={!shareUrl}
+                      onClick={() => { if (shareUrl) { navigator.clipboard.writeText(shareUrl); setShareSendStatus('Link copied') } }}
+                      style={{ padding: '8px 14px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, background: shareUrl ? 'var(--accent)' : 'var(--bg-hover)', color: shareUrl ? '#0A0A0F' : 'var(--text-tertiary)', cursor: shareUrl ? 'pointer' : 'not-allowed', flexShrink: 0, border: 'none', fontFamily: 'inherit' }}>Copy</button>
                   </div>
+                  {shareSendStatus && <p style={{ fontSize: 11, color: 'var(--accent)' }}>{shareSendStatus}</p>}
                 </div>
               )}
               {shareTab === 'embed' && (
@@ -970,8 +1405,35 @@ export default function Dashboard({ setPage }) {
               {shareTab === 'message' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>Send via message</p>
-                  <input placeholder="Email or phone number" style={{ width: '100%', padding: '8px 12px', fontSize: '13px', borderRadius: '6px', background: 'var(--bg-input)', border: '1px solid var(--border-mid)', color: 'var(--text-primary)', outline: 'none', fontFamily: 'inherit' }} />
-                  <button style={{ width: '100%', padding: '8px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, background: 'var(--accent)', color: '#0A0A0F', cursor: 'pointer', border: 'none', fontFamily: 'inherit' }}>Send</button>
+                  <input
+                    value={shareRecipient}
+                    onChange={e => setShareRecipient(e.target.value)}
+                    placeholder="Email or phone number"
+                    style={{ width: '100%', padding: '8px 12px', fontSize: '13px', borderRadius: '6px', background: 'var(--bg-input)', border: '1px solid var(--border-mid)', color: 'var(--text-primary)', outline: 'none', fontFamily: 'inherit' }} />
+                  <button
+                    disabled={!shareUrl || !shareRecipient.trim()}
+                    onClick={() => {
+                      const r = shareRecipient.trim()
+                      if (!r || !shareUrl) return
+                      const title = shareProject.title || shareProject.filename || 'a track'
+                      const body = `Check out "${title}" on SoundBridg: ${shareUrl}`
+                      // Simple detection: digits/+/-/space/paren → SMS, otherwise email
+                      const isPhone = /^[+()\-\d\s]+$/.test(r)
+                      const href = isPhone
+                        ? `sms:${r.replace(/[^+\d]/g, '')}${/iPhone|iPad|Mac/.test(navigator.userAgent) ? '&' : '?'}body=${encodeURIComponent(body)}`
+                        : `mailto:${encodeURIComponent(r)}?subject=${encodeURIComponent('A track for you — SoundBridg')}&body=${encodeURIComponent(body)}`
+                      window.location.href = href
+                      setShareSendStatus(isPhone ? 'Opening your Messages app…' : 'Opening your mail app…')
+                    }}
+                    style={{
+                      width: '100%', padding: '8px', borderRadius: '6px',
+                      fontSize: '13px', fontWeight: 600,
+                      background: (shareUrl && shareRecipient.trim()) ? 'var(--accent)' : 'var(--bg-hover)',
+                      color: (shareUrl && shareRecipient.trim()) ? '#0A0A0F' : 'var(--text-tertiary)',
+                      cursor: (shareUrl && shareRecipient.trim()) ? 'pointer' : 'not-allowed',
+                      border: 'none', fontFamily: 'inherit',
+                    }}>Send</button>
+                  {shareSendStatus && <p style={{ fontSize: 11, color: 'var(--accent)' }}>{shareSendStatus}</p>}
                 </div>
               )}
             </div>
@@ -1014,64 +1476,157 @@ function SideNavItem({ children, active, onClick, icon, badge }) {
 }
 
 function StatCard({ label, value, delta, deltaType, sub, small, bar, barPct }) {
+  const [hover, setHover] = useState(false)
   return (
-    <div style={{
-      background: 'var(--bg-card)', border: '1px solid var(--border)',
-      borderRadius: '14px', padding: '20px 24px',
-      transition: 'border-color 0.15s',
-    }}
-      onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--border-mid)'}
-      onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}>
-      <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '12px' }}>{label}</div>
-      <div style={{ fontSize: small ? '20px' : '26px', fontWeight: 700, letterSpacing: small ? '-0.5px' : '-1px', color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums', lineHeight: 1, marginBottom: '8px' }}>{value}</div>
-      {delta && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{
-            fontSize: '11px', fontWeight: 600, fontFamily: 'JetBrains Mono,monospace',
-            padding: '2px 6px', borderRadius: '999px',
-            background: deltaType === 'up' ? 'var(--green-dim)' : 'var(--accent-dim)',
-            color: deltaType === 'up' ? 'var(--green)' : 'var(--accent)',
-          }}>{delta}</span>
-        </div>
-      )}
-      {sub && <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginBottom: bar ? '6px' : 0 }}>{sub}</div>}
-      {bar && (
-        <div style={{ height: '3px', background: 'var(--border-mid)', borderRadius: '2px', overflow: 'hidden', marginTop: '12px' }}>
-          <div style={{
-            height: '100%', borderRadius: '2px',
-            background: 'linear-gradient(90deg,var(--primary-mid),var(--accent))',
-            width: `${barPct}%`,
-            transition: 'width 0.6s cubic-bezier(0.4,0,0.2,1)',
-          }} />
-        </div>
-      )}
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        position: 'relative', overflow: 'hidden',
+        background: 'var(--bg-card)',
+        border: `1px solid ${hover ? 'var(--border-mid)' : 'var(--border)'}`,
+        borderRadius: '20px', padding: '22px 24px',
+        transition: 'all 0.2s ease',
+        transform: hover ? 'translateY(-1px)' : 'translateY(0)',
+        boxShadow: hover ? '0 8px 24px rgba(0,0,0,0.25)' : '0 1px 0 rgba(255,255,255,0.02) inset',
+      }}>
+      {/* Subtle gradient accent glow behind */}
+      <div style={{
+        position: 'absolute', top: -40, right: -40,
+        width: 140, height: 140, borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(201,168,76,0.12) 0%, transparent 70%)',
+        pointerEvents: 'none',
+        opacity: hover ? 1 : 0.55,
+        transition: 'opacity 0.25s ease',
+      }} />
+      <div style={{ position: 'relative' }}>
+        <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '14px' }}>{label}</div>
+        <div style={{
+          fontSize: small ? '22px' : '32px',
+          fontWeight: 700, letterSpacing: '-0.03em',
+          background: 'linear-gradient(180deg, var(--text-primary) 0%, rgba(240,240,245,0.85) 100%)',
+          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+          fontVariantNumeric: 'tabular-nums', lineHeight: 1, marginBottom: '10px',
+        }}>{value}</div>
+        {delta && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{
+              fontSize: '11px', fontWeight: 600, fontFamily: 'JetBrains Mono,monospace',
+              padding: '3px 8px', borderRadius: '999px',
+              background: deltaType === 'up' ? 'var(--green-dim)' : 'var(--accent-dim)',
+              color: deltaType === 'up' ? 'var(--green)' : 'var(--accent)',
+              border: `1px solid ${deltaType === 'up' ? 'rgba(34,197,94,0.2)' : 'var(--accent-line)'}`,
+            }}>{delta}</span>
+          </div>
+        )}
+        {sub && <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: bar ? '6px' : 0 }}>{sub}</div>}
+        {bar && (
+          <div style={{ height: '4px', background: 'rgba(255,255,255,0.08)', borderRadius: '999px', overflow: 'hidden', marginTop: '14px' }}>
+            <div style={{
+              height: '100%', borderRadius: '999px',
+              background: 'linear-gradient(90deg,var(--primary-mid),var(--accent))',
+              width: `${barPct}%`,
+              transition: 'width 0.8s cubic-bezier(0.4,0,0.2,1)',
+              boxShadow: '0 0 12px rgba(201,168,76,0.4)',
+            }} />
+          </div>
+        )}
+      </div>
     </div>
   )
 }
 
-function ProjectCard2({ name, artGrad, emoji, meta }) {
+function ProjectCard2({ name, artGrad, letter, meta }) {
   const [hovered, setHovered] = useState(false)
   return (
-    <div style={{
-      background: 'var(--bg-card)', border: `1px solid ${hovered ? 'var(--border-accent)' : 'var(--border)'}`,
-      borderRadius: '14px', overflow: 'hidden', cursor: 'pointer',
-      transform: hovered ? 'translateY(-1px)' : 'translateY(0)',
-      transition: 'border-color 0.15s,transform 0.15s',
-    }}
+    <div
+      className="group transition-all duration-200 ease-out"
+      style={{
+        background: 'var(--bg-card)', border: `1px solid ${hovered ? 'var(--border-accent)' : 'var(--border)'}`,
+        borderRadius: '20px', overflow: 'hidden', cursor: 'pointer',
+        transform: hovered ? 'translateY(-2px)' : 'translateY(0)',
+        boxShadow: hovered ? '0 12px 32px rgba(0,0,0,0.35)' : '0 2px 8px rgba(0,0,0,0.15)',
+      }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}>
-      <div style={{ width: '100%', aspectRatio: '1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '40px', position: 'relative', overflow: 'hidden', background: artGrad }}>
-        {emoji}
-        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: hovered ? 1 : 0, transition: 'opacity 0.2s' }}>
-          <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 24px var(--accent-glow)' }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="#0A0A0F"><path d="M8 5v14l11-7z" /></svg>
-          </div>
+      <div style={{
+        width: '100%', aspectRatio: '1', position: 'relative', overflow: 'hidden',
+        background: artGrad,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <span style={{
+          fontSize: '72px', fontWeight: 800, letterSpacing: '-0.04em',
+          color: 'rgba(255,255,255,0.95)', textShadow: '0 4px 20px rgba(0,0,0,0.25)',
+        }}>{letter}</span>
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.35) 100%)',
+          pointerEvents: 'none',
+        }} />
+        <div style={{
+          position: 'absolute', right: 12, bottom: 12,
+          width: 48, height: 48, borderRadius: '50%',
+          background: 'var(--accent)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 8px 24px rgba(201,168,76,0.45)',
+          opacity: hovered ? 1 : 0,
+          transform: hovered ? 'translateY(0)' : 'translateY(8px)',
+          transition: 'opacity 0.2s ease, transform 0.2s ease',
+        }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="#0A0A0F"><path d="M8 5v14l11-7z" /></svg>
         </div>
       </div>
-      <div style={{ padding: '16px', borderTop: '1px solid var(--border)' }}>
-        <div style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: '4px' }}>{name}</div>
+      <div style={{ padding: '14px 16px' }}>
+        <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: '4px', letterSpacing: '-0.01em' }}>{name}</div>
         <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{meta}</div>
       </div>
+    </div>
+  )
+}
+
+// Spotify-style track thumbnail with hover play overlay + playing equalizer state
+function TrackArt({ grad, letter, size = 42, showPlay = false, isActive = false, isPlaying = false }) {
+  const [hover, setHover] = useState(false)
+  return (
+    <div
+      className="relative flex-shrink-0 transition-all duration-200 ease-out"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: size, height: size, borderRadius: '10px', overflow: 'hidden',
+        background: grad,
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12), 0 2px 8px rgba(0,0,0,0.25)',
+      }}>
+      <div
+        className="absolute inset-0 flex items-center justify-center transition-opacity duration-200"
+        style={{
+          fontSize: Math.round(size * 0.42), fontWeight: 700, letterSpacing: '-0.02em',
+          color: 'rgba(255,255,255,0.95)', textShadow: '0 2px 8px rgba(0,0,0,0.25)',
+          opacity: (hover && showPlay) || isActive ? 0.25 : 1,
+        }}>
+        {letter}
+      </div>
+      {isActive && isPlaying && (
+        <div className="absolute inset-0 flex items-end justify-center gap-[2px] pb-[6px]">
+          {[0, 1, 2].map(i => (
+            <span
+              key={i}
+              style={{
+                width: 3, background: '#fde047',
+                borderRadius: '2px',
+                animation: `sbEq 0.9s ease-in-out ${i * 0.18}s infinite alternate`,
+              }}
+            />
+          ))}
+        </div>
+      )}
+      {hover && showPlay && !isActive && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <svg width={Math.round(size * 0.44)} height={Math.round(size * 0.44)} viewBox="0 0 24 24" fill="white" style={{ filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.45))' }}>
+            <path d="M8 5v14l11-7z" />
+          </svg>
+        </div>
+      )}
     </div>
   )
 }
@@ -1112,9 +1667,9 @@ function IconBtn({ children, onClick, title, disabled, color }) {
   )
 }
 
-function PlayerCtrlBtn({ children }) {
+function PlayerCtrlBtn({ children, onClick }) {
   return (
-    <button style={{
+    <button onClick={(e) => { e.stopPropagation(); onClick && onClick(e) }} style={{
       background: 'none', border: 'none', color: 'var(--text-secondary)',
       cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center',
       borderRadius: '6px', transition: 'color 0.1s,background 0.1s',
@@ -1124,6 +1679,14 @@ function PlayerCtrlBtn({ children }) {
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">{children}</svg>
     </button>
   )
+}
+
+function fullCtrlStyle() {
+  return {
+    background: 'none', border: 'none', color: 'var(--text-secondary)',
+    cursor: 'pointer', padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    borderRadius: '50%', transition: 'color 0.1s,background 0.1s',
+  }
 }
 
 function CtxItem({ children, onClick, red }) {

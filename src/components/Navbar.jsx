@@ -13,18 +13,20 @@ export default function Navbar({ page, setPage }) {
 
   return (
     <nav className="sticky top-0 z-50" style={{
-      height: '52px',
-      background: 'rgba(10,10,15,0.90)',
-      backdropFilter: 'blur(20px)',
+      height: '56px',
+      background: 'rgba(10,10,15,0.85)',
+      backdropFilter: 'blur(24px) saturate(1.4)',
+      WebkitBackdropFilter: 'blur(24px) saturate(1.4)',
       borderBottom: '1px solid var(--border)',
     }}>
-      <div className="max-w-6xl mx-auto px-8 h-full flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-6 h-full flex items-center justify-between">
         {/* Logo */}
-        <button onClick={() => setPage('home')} className="flex items-center gap-2.5 group">
-          <div className="w-7 h-7 rounded-[6px] flex items-center justify-center shrink-0" style={{
+        <button onClick={() => setPage('home')} className="flex items-center gap-2.5 group transition-opacity duration-200 hover:opacity-90">
+          <div className="w-8 h-8 rounded-[9px] flex items-center justify-center shrink-0 shadow-lg" style={{
             background: 'linear-gradient(135deg, #1B3A5C 0%, #C9A84C 120%)',
+            boxShadow: '0 4px 14px rgba(201,168,76,0.15)',
           }}>
-            <svg viewBox="0 0 24 24" fill="none" className="w-3.5 h-3.5">
+            <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4">
               <path d="M9 18V6l12-2v12" stroke="#0A0A0F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               <circle cx="6" cy="18" r="3" stroke="#0A0A0F" strokeWidth="2"/>
               <circle cx="18" cy="16" r="3" stroke="#0A0A0F" strokeWidth="2"/>
@@ -36,13 +38,12 @@ export default function Navbar({ page, setPage }) {
         </button>
 
         {/* Desktop Nav */}
-        <div className="hidden md:flex items-center gap-0.5">
+        <div className="hidden md:flex items-center gap-1">
           {user ? (
             <>
               <NavBtn active={page === 'dashboard'} onClick={() => setPage('dashboard')}>Dashboard</NavBtn>
               <NavBtn active={page === 'convert'} onClick={() => setPage('convert')}>Convert</NavBtn>
               <NavBtn active={page === 'groups'} onClick={() => setPage('groups')}>Sync Groups</NavBtn>
-              <NavBtn active={page === 'player'} onClick={() => setPage('player')}>Player</NavBtn>
               <div className="ml-3 flex items-center gap-2" style={{borderLeft: '1px solid var(--border)', paddingLeft: '12px'}}>
                 <span className="text-[13px] truncate max-w-[120px]" style={{color: 'var(--text-secondary)'}}>{user.email}</span>
                 <button onClick={handleLogout} className="px-3 py-1.5 rounded-[6px] text-[13px] font-medium transition-colors"
@@ -90,7 +91,6 @@ export default function Navbar({ page, setPage }) {
               <MobileNavBtn onClick={() => { setPage('dashboard'); setMenuOpen(false) }}>Dashboard</MobileNavBtn>
               <MobileNavBtn onClick={() => { setPage('convert'); setMenuOpen(false) }}>Convert</MobileNavBtn>
               <MobileNavBtn onClick={() => { setPage('groups'); setMenuOpen(false) }}>Sync Groups</MobileNavBtn>
-              <MobileNavBtn onClick={() => { setPage('player'); setMenuOpen(false) }}>Player</MobileNavBtn>
               <button onClick={handleLogout} className="text-left px-3 py-2 rounded-[6px] text-[13px] transition-colors"
                 style={{color: 'var(--red)'}}>Logout</button>
             </>
@@ -110,10 +110,11 @@ export default function Navbar({ page, setPage }) {
 function NavBtn({ children, onClick, active }) {
   return (
     <button onClick={onClick}
-      className="px-3 py-1.5 rounded-[6px] text-[13px] font-medium transition-colors"
+      className="px-3.5 py-1.5 rounded-full text-[13px] font-medium transition-all duration-200 ease-out hover:text-white"
       style={{
         color: active ? 'var(--accent)' : 'var(--text-secondary)',
         background: active ? 'var(--accent-dim)' : 'transparent',
+        border: active ? '1px solid var(--accent-line)' : '1px solid transparent',
       }}>
       {children}
     </button>

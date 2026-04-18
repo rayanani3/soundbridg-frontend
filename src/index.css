@@ -89,6 +89,25 @@ body {
   to   { transform: rotate(360deg); }
 }
 
+/* Equalizer bars for actively playing track thumbnails */
+@keyframes sbEq {
+  0%   { height: 20%; }
+  100% { height: 85%; }
+}
+
+/* Full-screen player entrance */
+@keyframes sbPlayerIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.995); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Breathing dot (used for live indicators) */
+@keyframes sbBreathe {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.15); }
+}
+.animate-breathe { animation: sbBreathe 1.8s ease-in-out infinite; }
+
 .delay-100 { animation-delay: 0.1s; }
 .delay-200 { animation-delay: 0.2s; }
 .delay-300 { animation-delay: 0.3s; }

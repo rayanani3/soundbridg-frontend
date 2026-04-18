@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
 
 export default function Player() {
@@ -20,6 +20,7 @@ export default function Player() {
   const isDragging = useRef(false)
   const isVolumeDragging = useRef(false)
 
+  // Fetch tracks
   useEffect(() => {
     const fetchTracks = async () => {
       try {
@@ -28,7 +29,6 @@ export default function Player() {
         })
         const data = await res.json()
         if (res.ok) {
-          // Only show streamable audio formats
           const audio = Array.isArray(data)
             ? data.filter(p => ['mp3', 'wav', 'flac', 'ogg', 'aiff', 'm4a'].includes(p.format?.toLowerCase()))
             : []
@@ -40,27 +40,41 @@ export default function Player() {
     fetchTracks()
   }, [])
 
-  // Apply persisted volume to audio element on mount
+  // Set initial volume on audio element
   useEffect(() => {
     const audio = audioRef.current
     if (audio) audio.volume = volume
   }, [])
 
+  // Audio event listeners
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
+
+    const grabDuration = () => {
+      if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
+        setDuration(audio.duration)
+      }
+    }
+
     const onTime = () => {
       if (isDragging.current) return
       setProgress(audio.currentTime)
+      // Fallback: grab duration from timeupdate if metadata events missed
+      grabDuration()
     }
-    const onDuration = () => setDuration(audio.duration)
     const onEnd = () => { setPlaying(false); setProgress(0) }
+
     audio.addEventListener('timeupdate', onTime)
-    audio.addEventListener('loadedmetadata', onDuration)
+    audio.addEventListener('loadedmetadata', grabDuration)
+    audio.addEventListener('durationchange', grabDuration)
+    audio.addEventListener('canplay', grabDuration)
     audio.addEventListener('ended', onEnd)
     return () => {
       audio.removeEventListener('timeupdate', onTime)
-      audio.removeEventListener('loadedmetadata', onDuration)
+      audio.removeEventListener('loadedmetadata', grabDuration)
+      audio.removeEventListener('durationchange', grabDuration)
+      audio.removeEventListener('canplay', grabDuration)
       audio.removeEventListener('ended', onEnd)
     }
   }, [])
@@ -69,7 +83,6 @@ export default function Player() {
     const audio = audioRef.current
     if (!audio) return
 
-    // Toggle play/pause on same track
     if (current?.id === track.id) {
       if (playing) { audio.pause(); setPlaying(false) }
       else { audio.play().catch(() => {}); setPlaying(true) }
@@ -77,13 +90,14 @@ export default function Player() {
     }
 
     audio.pause()
+    audio.currentTime = 0
     setCurrent(track)
     setPlaying(false)
     setProgress(0)
+    setDuration(0)
     setLoadingTrack(true)
 
     try {
-      // Fetch signed stream URL from backend
       const res = await fetch(`${BACKEND_URL}/api/tracks/${track.id}/stream`, {
         headers: { Authorization: `Bearer ${getToken()}` }
       })
@@ -91,8 +105,13 @@ export default function Player() {
       if (!res.ok || !data.stream_url) throw new Error('No stream URL')
       audio.src = data.stream_url
       audio.volume = volume
+      audio.preload = 'auto'
       audio.load()
       await audio.play()
+      // Grab duration now that playback started
+      if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
+        setDuration(audio.duration)
+      }
       setPlaying(true)
     } catch {
       setCurrent(null)
@@ -107,60 +126,98 @@ export default function Player() {
     else { audio.play().catch(() => {}); setPlaying(true) }
   }
 
-  // ── Progress bar drag ──────────────────────────────────────────────────────
-  const scrubTo = (clientX) => {
-    const rect = progressRef.current.getBoundingClientRect()
-    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+  // ── Progress scrub (click + drag) ──────────────────────────────────────────
+  const scrubTo = useCallback((clientX) => {
+    const bar = progressRef.current
     const audio = audioRef.current
-    const dur = audio.duration && isFinite(audio.duration) ? audio.duration : 0
-    if (!dur) return
+    if (!bar || !audio) return
+    const rect = bar.getBoundingClientRect()
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+    // Read duration directly from the DOM element — never from React state
+    const dur = audio.duration
+    if (!dur || !isFinite(dur) || dur <= 0) return
     audio.currentTime = ratio * dur
     setProgress(audio.currentTime)
-  }
+  }, [])
 
-  const onProgressMouseMove = (e) => { if (isDragging.current) scrubTo(e.clientX) }
-  const onProgressMouseUp = () => {
-    isDragging.current = false
-    document.removeEventListener('mousemove', onProgressMouseMove)
-    document.removeEventListener('mouseup', onProgressMouseUp)
-  }
+  useEffect(() => {
+    const onMove = (e) => { if (isDragging.current) scrubTo(e.clientX) }
+    const onUp = () => {
+      if (isDragging.current) {
+        isDragging.current = false
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+      }
+    }
 
-  const onProgressMouseDown = (e) => {
-    isDragging.current = true
-    scrubTo(e.clientX)
-    document.addEventListener('mousemove', onProgressMouseMove)
-    document.addEventListener('mouseup', onProgressMouseUp)
-  }
+    const bar = progressRef.current
+    if (!bar) return
 
-  // ── Volume slider drag ──────────────────────────────────────────────────────
-  const applyVolume = (clientX) => {
-    const rect = volumeBarRef.current.getBoundingClientRect()
+    const onDown = (e) => {
+      e.preventDefault()
+      isDragging.current = true
+      scrubTo(e.clientX)
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+    }
+
+    bar.addEventListener('mousedown', onDown)
+    return () => {
+      bar.removeEventListener('mousedown', onDown)
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+  }, [scrubTo])
+
+  // ── Volume drag (click + drag) ─────────────────────────────────────────────
+  const applyVolume = useCallback((clientX) => {
+    const bar = volumeBarRef.current
+    if (!bar) return
+    const rect = bar.getBoundingClientRect()
     const val = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
     setVolume(val)
     if (audioRef.current) audioRef.current.volume = val
-    localStorage.setItem('sb_volume', val)
-  }
+    localStorage.setItem('sb_volume', String(val))
+  }, [])
 
-  const onVolumeMouseMove = (e) => { if (isVolumeDragging.current) applyVolume(e.clientX) }
-  const onVolumeMouseUp = () => {
-    isVolumeDragging.current = false
-    document.removeEventListener('mousemove', onVolumeMouseMove)
-    document.removeEventListener('mouseup', onVolumeMouseUp)
-  }
+  useEffect(() => {
+    const onMove = (e) => { if (isVolumeDragging.current) applyVolume(e.clientX) }
+    const onUp = () => {
+      if (isVolumeDragging.current) {
+        isVolumeDragging.current = false
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+      }
+    }
 
-  const onVolumeMouseDown = (e) => {
-    isVolumeDragging.current = true
-    applyVolume(e.clientX)
-    document.addEventListener('mousemove', onVolumeMouseMove)
-    document.addEventListener('mouseup', onVolumeMouseUp)
-  }
+    const bar = volumeBarRef.current
+    if (!bar) return
+
+    const onDown = (e) => {
+      e.preventDefault()
+      isVolumeDragging.current = true
+      applyVolume(e.clientX)
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+    }
+
+    bar.addEventListener('mousedown', onDown)
+    return () => {
+      bar.removeEventListener('mousedown', onDown)
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+  }, [applyVolume])
 
   const fmtTime = (s) => {
-    if (!s || isNaN(s)) return '0:00'
+    if (!s || !isFinite(s) || isNaN(s)) return '0:00'
     const m = Math.floor(s / 60)
     const sec = Math.floor(s % 60)
     return `${m}:${sec.toString().padStart(2, '0')}`
   }
+
+  // Compute progress bar width safely
+  const progressPct = (duration > 0 && isFinite(duration)) ? Math.min(100, (progress / duration) * 100) : 0
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-10">
@@ -169,7 +226,7 @@ export default function Player() {
         <p className="text-white/50 text-sm">Preview your synced and converted tracks.</p>
       </div>
 
-      <audio ref={audioRef} />
+      <audio ref={audioRef} preload="auto" />
 
       {/* Now playing */}
       {current && (
@@ -186,20 +243,19 @@ export default function Player() {
             </div>
           </div>
 
-          {/* Progress bar */}
+          {/* Progress bar — no transition so drag is instant */}
           <div className="mb-3">
             <div
               ref={progressRef}
-              className="w-full h-1.5 rounded-full cursor-pointer overflow-hidden"
+              className="w-full h-2 rounded-full cursor-pointer overflow-hidden select-none"
               style={{background:'rgba(27,58,92,0.5)'}}
-              onMouseDown={onProgressMouseDown}
             >
               <div
-                className="h-full rounded-full transition-all"
-                style={{width: `${(progress / duration) * 100 || 0}%`, background:'linear-gradient(90deg,#c9a84c,#fde047)'}}
+                className="h-full rounded-full pointer-events-none"
+                style={{width: `${progressPct}%`, background:'linear-gradient(90deg,#c9a84c,#fde047)'}}
               />
             </div>
-            <div className="flex justify-between text-xs text-white/40 mt-1">
+            <div className="flex justify-between text-xs text-white/40 mt-1 select-none">
               <span>{fmtTime(progress)}</span>
               <span>{fmtTime(duration)}</span>
             </div>
@@ -219,15 +275,14 @@ export default function Player() {
           </div>
 
           {/* Volume */}
-          <div className="flex items-center gap-2 mt-4">
+          <div className="flex items-center gap-2 mt-4 select-none">
             <svg className="w-4 h-4 text-white/40 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-9.536a5 5 0 000 7.072"/>
             </svg>
             <div
               ref={volumeBarRef}
-              className="flex-1 h-1 rounded-full cursor-pointer"
+              className="flex-1 h-2 rounded-full cursor-pointer"
               style={{background:`linear-gradient(to right, #c9a84c ${volume*100}%, rgba(27,58,92,0.5) ${volume*100}%)`}}
-              onMouseDown={onVolumeMouseDown}
             />
           </div>
         </div>

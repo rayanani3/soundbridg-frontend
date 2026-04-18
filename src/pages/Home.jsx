@@ -1,5 +1,4 @@
 const DMG_URL = 'https://pub-83f852d659c145459103180a6d018dc2.r2.dev/SoundBridg-latest-universal.dmg'
-const DMG_URL_LEGACY = 'https://pub-83f852d659c145459103180a6d018dc2.r2.dev/SoundBridg-latest-universal.dmg'
 
 export default function Home({ setPage }) {
   return (
@@ -30,24 +29,25 @@ export default function Home({ setPage }) {
           </div>
 
           {/* Headline */}
-          <h1 className="font-display font-extrabold leading-[1.1] mb-5"
+          <h1 className="font-display font-extrabold leading-[1.05] mb-6"
             style={{ fontSize: 'clamp(2.4rem,5.5vw,4.2rem)', color: 'var(--text-primary)' }}>
-            Your FL Studio,{' '}
+            Your mixes hit your phone{' '}
             <span style={{
               background: 'linear-gradient(90deg, #c9a84c, #fde047)',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               backgroundClip: 'text',
             }}>
-              always in the cloud.
+              the second you bounce them
             </span>
+            {' '}— no AirDrop, no hassle.
           </h1>
 
           {/* Subheadline */}
           <p className="text-lg leading-relaxed max-w-xl mx-auto mb-10"
             style={{ color: 'var(--text-secondary)' }}>
-            SoundBridg watches your projects folder and syncs every bounce automatically —
-            no clicks, no exports, no thinking.
+            Your studio follows you everywhere — SoundBridg auto-syncs every
+            MP3 and WAV the moment it's made.
           </p>
 
           {/* CTA row */}
@@ -60,21 +60,7 @@ export default function Home({ setPage }) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               Download for Mac
-              <span className="text-xs font-normal opacity-60">macOS 13+</span>
             </a>
-            <a href={DMG_URL_LEGACY} download
-              className="flex items-center gap-2.5 px-6 py-3.5 rounded-xl font-medium transition-all hover:text-white"
-              style={{ color: 'var(--text-secondary)', border: '1px solid var(--border-mid)' }}>
-              Download for Mac
-              <span className="text-xs font-normal opacity-60">macOS 12 Monterey</span>
-            </a>
-
-            {/* Sign In */}
-            <button onClick={() => setPage('login')}
-              className="px-6 py-3.5 rounded-xl font-medium transition-all hover:text-white"
-              style={{ color: 'var(--text-secondary)', border: '1px solid var(--border-mid)' }}>
-              Sign In
-            </button>
 
             {/* Get Started Free */}
             <button onClick={() => setPage('register')}

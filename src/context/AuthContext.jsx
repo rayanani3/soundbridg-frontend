@@ -34,10 +34,13 @@ export function AuthProvider({ children }) {
   }
 
   const register = async (email, password, name) => {
+    // Backend requires `username`. If the register form only gave us a display
+    // name, derive a username from it (or fall back to the email prefix).
+    const username = (name || '').trim() || (email.split('@')[0] || '').trim()
     const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name })
+      body: JSON.stringify({ email, password, username, name: name || username })
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'Registration failed')

@@ -44,7 +44,7 @@ export function LoginPage({ setPage }) {
 
 export function RegisterPage({ setPage }) {
   const { register } = useAuth()
-  const [name, setName] = useState('')
+  const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -53,10 +53,11 @@ export function RegisterPage({ setPage }) {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+    if (!username.trim()) { setError('Username is required'); return }
     if (password.length < 6) { setError('Password must be at least 6 characters'); return }
     setLoading(true)
     try {
-      await register(email, password, name)
+      await register(email, password, username.trim())
       setPage('dashboard')
     } catch (err) {
       setError(err.message)
@@ -67,7 +68,7 @@ export function RegisterPage({ setPage }) {
 
   return <AuthCard title="Create account" subtitle="Start syncing your FL Studio projects">
     <form onSubmit={handleSubmit} style={{display:'flex',flexDirection:'column',gap:'16px'}}>
-      <Field label="Name" type="text" value={name} onChange={setName} placeholder="Your name" />
+      <Field label="Username" type="text" value={username} onChange={setUsername} placeholder="producer_name" />
       <Field label="Email" type="email" value={email} onChange={setEmail} placeholder="you@example.com" />
       <Field label="Password" type="password" value={password} onChange={setPassword} placeholder="Min 6 characters" />
       {error && (

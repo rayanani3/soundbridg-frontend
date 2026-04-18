@@ -6,12 +6,21 @@ import { LoginPage, RegisterPage } from './pages/Auth'
 import Dashboard from './pages/Dashboard'
 import Convert from './pages/Convert'
 import SyncGroups from './pages/SyncGroups'
-import Player from './pages/Player'
 import Upgrade from './pages/Upgrade'
+import SharedTrack from './pages/SharedTrack'
+
+// Parse /shared/:token before any auth routing so public share links work
+// for signed-out visitors.
+const sharedMatch = typeof window !== 'undefined' ? window.location.pathname.match(/^\/shared\/([A-Za-z0-9_-]+)\/?$/) : null
+const sharedToken = sharedMatch ? sharedMatch[1] : null
 
 function AppInner() {
   const { user, loading } = useAuth()
   const [page, setPage] = useState('home')
+
+  if (sharedToken) {
+    return <SharedTrack token={sharedToken} />
+  }
 
   if (loading) {
     return (
@@ -26,7 +35,7 @@ function AppInner() {
 
   const effectivePage = (() => {
     if (user && (page === 'home' || page === 'login' || page === 'register')) return 'dashboard'
-    if (!user && ['dashboard', 'convert', 'groups', 'player', 'upgrade'].includes(page)) return 'login'
+    if (!user && ['dashboard', 'convert', 'groups', 'upgrade'].includes(page)) return 'login'
     return page
   })()
 
@@ -41,7 +50,6 @@ function AppInner() {
       case 'dashboard': return <Dashboard setPage={setPage} />
       case 'convert': return <Convert />
       case 'groups': return <SyncGroups />
-      case 'player': return <Player />
       case 'upgrade': return <Upgrade setPage={setPage} />
       default: return <Home setPage={setPage} />
     }
