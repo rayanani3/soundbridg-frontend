@@ -5,7 +5,6 @@ import Home from './pages/Home'
 import { LoginPage, RegisterPage } from './pages/Auth'
 import Dashboard from './pages/Dashboard'
 import Convert from './pages/Convert'
-import SyncGroups from './pages/SyncGroups'
 import Upgrade from './pages/Upgrade'
 import SharedTrack from './pages/SharedTrack'
 
@@ -35,7 +34,7 @@ function AppInner() {
 
   const effectivePage = (() => {
     if (user && (page === 'home' || page === 'login' || page === 'register')) return 'dashboard'
-    if (!user && ['dashboard', 'convert', 'groups', 'upgrade'].includes(page)) return 'login'
+    if (!user && ['dashboard', 'convert', 'upgrade'].includes(page)) return 'login'
     return page
   })()
 
@@ -49,7 +48,6 @@ function AppInner() {
       case 'register': return <RegisterPage setPage={setPage} />
       case 'dashboard': return <Dashboard setPage={setPage} />
       case 'convert': return <Convert />
-      case 'groups': return <SyncGroups />
       case 'upgrade': return <Upgrade setPage={setPage} />
       default: return <Home setPage={setPage} />
     }
